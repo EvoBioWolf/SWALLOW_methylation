@@ -1,0 +1,40 @@
+PLINK v1.90b6.21 64-bit (19 Oct 2020)
+Options in effect:
+  --allow-extra-chr
+  --allow-no-sex
+  --autosome
+  --chr-set 37 no-xy
+  --double-id
+  --keep /dss/dsshome1/lxc0B/ra52qed/gitlab/swallow.projects/scripts/2_WGS/1_Genetic_Data_168/1_Population_Structure/0.PCA/keep.85.txt
+  --keep-allele-order
+  --make-bed
+  --out HR.85
+  --pca
+  --set-missing-var-ids @:#
+  --vcf /dss/dsslegfs01/pr53da/pr53da-dss-0034/vcf/merged/HR.168.filtered.sort.pruned.vcf.gz
+
+Hostname: cm2login4
+Working directory: /dss/dsshome1/lxc0B/ra52qed/gitlab/swallow.projects/scripts/2_WGS/1_Genetic_Data_168/1_Population_Structure/0.PCA
+Start time: Thu Nov  2 17:20:53 2023
+
+Random number seed: 1698942053
+120028 MB RAM detected; reserving 60014 MB for main workspace.
+Allocated 25317 MB successfully, after larger attempt(s) failed.
+--vcf: HR.85-temporary.bed + HR.85-temporary.bim + HR.85-temporary.fam written.
+(338865 variants skipped.)
+3879251 variants loaded from .bim file.
+3879251 missing IDs set.
+168 samples (0 males, 0 females, 168 ambiguous) loaded from .fam.
+Ambiguous sex IDs written to HR.85.nosex .
+--keep: 85 samples remaining.
+Using up to 55 threads (change this with --threads).
+Before main variant filters, 85 founders and 0 nonfounders present.
+Calculating allele frequencies... done.
+Total genotyping rate in remaining samples is 0.853654.
+3879251 variants and 85 samples pass filters and QC.
+Note: No phenotypes present.
+Relationship matrix calculation complete.
+--pca: Results saved to HR.85.eigenval and HR.85.eigenvec .
+--make-bed to HR.85.bed + HR.85.bim + HR.85.fam ... done.
+
+End time: Thu Nov  2 17:22:31 2023

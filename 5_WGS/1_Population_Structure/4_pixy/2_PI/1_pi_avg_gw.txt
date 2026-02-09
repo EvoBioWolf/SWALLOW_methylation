@@ -1,0 +1,8 @@
+pop	avg_pi
+tytleri	0.00508282
+erythrogaster	0.00500019
+savignii	0.00479438
+rustica.eu	0.00534463
+rustica.r	0.00530216
+transitiva	0.00421226
+gutturalis	0.00507287

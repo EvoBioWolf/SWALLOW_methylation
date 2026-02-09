@@ -1,0 +1,87 @@
+---
+title: "pairwise FST population-wide"
+author: "Sarah Mueller"
+date: "2023-07-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(ggplot2, lib = "/dss/dsshome1/lxc0B/ra52qed/R/x86_64-pc-linux-gnu-library/4.2")
+library(plyr)
+library(dplyr)
+library(broom)
+library(readxl)
+library(tidyverse)
+
+```
+
+##Vcftools fst
+
+I wat to plot all pop-wide fst statistics across rustica subspecies
+
+
+```{r message=FALSE, warning=FALSE}
+fst.results <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowWGS_168/1_Population_Structure/3_FST/0_allsite_results/1_combined_fst_results.txt", header=F)
+colnames(fst.results) <- c("pop", "FST", "weighted_FST")
+
+#split pops into 2 columns
+fst.results <- fst.results %>%
+  separate(pop, into = c("pop1", "pop2"), sep = "_")
+
+#follwoign creates a duplicate where pop1=pop2 and vice versa for heatmap plotting
+# Create a copy of the original dataframe and switch the values of pop1 and pop2 columns
+fst.copy <- fst.results %>% 
+  transmute(pop1 = fst.results$pop2, pop2 = fst.results$pop1, FST = fst.results$FST, weighted_FST = fst.results$weighted_FST) 
+
+# Combine the two dataframes using bind_rows
+fst.results <- bind_rows(fst.results, fst.copy)
+fst.results <- fst.results %>%
+   mutate(pop1 = case_when(
+                  grepl("Rr", pop1) ~ "rustica.a",
+                  grepl("Rch", pop1) ~ "rustica.ch",
+                  grepl("Rde", pop1) ~ "rustica.de",
+                  grepl("Rfi", pop1) ~ "rustica.fi",
+                  grepl("G", pop1) ~ "gutturalis",
+                  grepl("E", pop1) ~ "erythrogaster",
+                  grepl("S", pop1) ~ "savignii",
+                  grepl("TV", pop1) ~ "transitiva",
+                  grepl("T", pop1) ~ "tytleri")) %>%
+  mutate(pop2 = case_when(
+                  grepl("Rr", pop2) ~ "rustica.a",
+                  grepl("Rch", pop2) ~ "rustica.ch",
+                  grepl("Rde", pop2) ~ "rustica.de",
+                  grepl("Rfi", pop2) ~ "rustica.fi",
+                  grepl("G", pop2) ~ "gutturalis",
+                  grepl("E", pop2) ~ "erythrogaster",
+                  grepl("S", pop2) ~ "savignii",
+                  grepl("TV", pop2) ~ "transitiva",
+                  grepl("T", pop2) ~ "tytleri"))
+
+```
+
+## make heatmap
+
+make heatmap of results
+
+```{r message=FALSE, warning=FALSE}
+
+heatmap_2 <- ggplot(fst.results, aes(x = pop1, y = pop2, fill = weighted_FST)) + 
+  geom_tile(data = subset(fst.results, pop1 < pop2), aes(fill = weighted_FST)) +
+  geom_text(data = subset(fst.results, pop1 < pop2), aes(label = sprintf("%0.3f", round(weighted_FST, digits = 3)))) +
+  coord_fixed() +
+  scale_fill_gradient(low = "lightgrey", high = "royalblue") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, size = 10, hjust = 1), 
+        axis.title = element_blank(), 
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank())
+
+
+
+heatmap_2
+
+
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

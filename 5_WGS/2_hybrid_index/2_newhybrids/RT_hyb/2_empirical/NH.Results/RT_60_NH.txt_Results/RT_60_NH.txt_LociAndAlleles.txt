@@ -1,0 +1,313 @@
+78 polymorphic loci from 78 loci in data set
+
+Locus chr01A_44245976
+	110
+	100
+
+Locus chr01A_44392124
+	100
+	110
+
+Locus chr01A_45766189
+	100
+	110
+
+Locus chr01A_45985083
+	100
+	110
+
+Locus chr01A_45985175
+	100
+	110
+
+Locus chr01A_45987888
+	100
+	110
+
+Locus chr01A_45988178
+	100
+	110
+
+Locus chr01A_45988186
+	100
+	110
+
+Locus chr01A_45988274
+	100
+	110
+
+Locus chr01A_45988328
+	100
+	110
+
+Locus chr01A_45988665
+	100
+	110
+
+Locus chr01A_45990033
+	100
+	110
+
+Locus chr01A_45990549
+	100
+	110
+
+Locus chr01A_45992384
+	100
+	110
+
+Locus chr01A_45993920
+	100
+	110
+
+Locus chr01A_45995093
+	100
+	110
+
+Locus chr01A_45995941
+	100
+	110
+
+Locus chr01A_45996363
+	100
+	110
+
+Locus chr01A_45996479
+	100
+	110
+
+Locus chr01A_45997065
+	100
+	110
+
+Locus chr01A_46253983
+	100
+	110
+
+Locus chr01A_46260468
+	100
+	110
+
+Locus chr01A_46261289
+	100
+	110
+
+Locus chr01A_46275547
+	100
+	110
+
+Locus chr01A_46275548
+	100
+	110
+
+Locus chr01A_46275549
+	100
+	110
+
+Locus chr01A_46275550
+	100
+	110
+
+Locus chr01A_46275551
+	100
+	110
+
+Locus chr01A_46275588
+	100
+	110
+
+Locus chr01A_46275776
+	100
+	110
+
+Locus chr01A_46276087
+	100
+	110
+
+Locus chr01A_46278498
+	100
+	110
+
+Locus chr01A_46278659
+	100
+	110
+
+Locus chr01A_46278696
+	100
+	110
+
+Locus chr01A_46279518
+	100
+	110
+
+Locus chr01A_46279519
+	100
+	110
+
+Locus chr01A_46279526
+	100
+	110
+
+Locus chr01A_46291512
+	100
+	110
+
+Locus chr01A_46291515
+	100
+	110
+
+Locus chr01A_46293190
+	100
+	110
+
+Locus chr01A_46293575
+	100
+	110
+
+Locus chr01A_46293604
+	100
+	110
+
+Locus chr01A_46294373
+	100
+	110
+
+Locus chr01A_46297791
+	100
+	110
+
+Locus chr01A_46297793
+	100
+	110
+
+Locus chr01A_46300738
+	100
+	110
+
+Locus chr01A_46301788
+	100
+	110
+
+Locus chr01A_46308614
+	100
+	110
+
+Locus chr01A_46308674
+	100
+	110
+
+Locus chr01A_46309403
+	100
+	110
+
+Locus chr01A_46321928
+	100
+	110
+
+Locus chr01A_46321992
+	100
+	110
+
+Locus chr01A_46326705
+	100
+	110
+
+Locus chr01A_46330436
+	100
+	110
+
+Locus chr01A_46334987
+	100
+	110
+
+Locus chr01A_46342028
+	100
+	110
+
+Locus chr01A_46342029
+	100
+	110
+
+Locus chr01A_46345029
+	100
+	110
+
+Locus chr01A_46356792
+	100
+	110
+
+Locus chr01A_46379500
+	100
+	110
+
+Locus chr01A_46385034
+	100
+	110
+
+Locus chr01A_46386149
+	100
+	110
+
+Locus chr01A_46387642
+	100
+	110
+
+Locus chr01A_46394408
+	100
+	110
+
+Locus chr01A_46394430
+	100
+	110
+
+Locus chr01A_46395563
+	100
+	110
+
+Locus chr01A_46395766
+	100
+	110
+
+Locus chr01A_46406336
+	100
+	110
+
+Locus chr01A_46407216
+	100
+	110
+
+Locus chr01A_46407593
+	100
+	110
+
+Locus chr01A_46413016
+	100
+	110
+
+Locus chr03_56473808
+	100
+	110
+
+Locus chr03_56476248
+	100
+	110
+
+Locus chr03_56476317
+	100
+	110
+
+Locus chr03_56551378
+	100
+	110
+
+Locus chr03_108490142
+	100
+	110
+
+Locus chr11_21391783
+	100
+	110
+
+Locus chr13_2433142
+	100
+	110

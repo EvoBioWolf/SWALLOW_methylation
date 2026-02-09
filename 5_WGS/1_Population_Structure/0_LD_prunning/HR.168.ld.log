@@ -1,0 +1,81 @@
+PLINK v1.90b6.21 64-bit (19 Oct 2020)
+Options in effect:
+  --allow-extra-chr
+  --allow-no-sex
+  --chr-set 37 no-xy
+  --double-id
+  --indep-pairwise 50 10 0.1
+  --keep-allele-order
+  --out /dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowWGS_168/1_Population_Structure/0_LD_prunning/HR.168.ld
+  --set-missing-var-ids @:#
+  --vcf /dss/dsslegfs01/pr53da/pr53da-dss-0034/vcf/merged/HR.168.biallelic.maf05.dp_3_60.vcf.gz
+
+Hostname: hlegr1409n04
+Working directory: /dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowWGS_168/1_Population_Structure/0_LD_prunning
+Start time: Wed Mar 19 13:43:37 2025
+
+Random number seed: 1742388217
+386322 MB RAM detected; reserving 193161 MB for main workspace.
+--vcf:
+/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowWGS_168/1_Population_Structure/0_LD_prunning/HR.168.ld-temporary.bed
++
+/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowWGS_168/1_Population_Structure/0_LD_prunning/HR.168.ld-temporary.bim
++
+/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowWGS_168/1_Population_Structure/0_LD_prunning/HR.168.ld-temporary.fam
+written.
+4985699 variants loaded from .bim file.
+4985699 missing IDs set.
+168 samples (0 males, 0 females, 168 ambiguous) loaded from .fam.
+Ambiguous sex IDs written to
+/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowWGS_168/1_Population_Structure/0_LD_prunning/HR.168.ld.nosex
+.
+Using 1 thread (no multithreaded calculations invoked).
+Before main variant filters, 168 founders and 0 nonfounders present.
+Calculating allele frequencies... done.
+Total genotyping rate is 0.930287.
+4985699 variants and 168 samples pass filters and QC.
+Note: No phenotypes present.
+Pruned 329482 variants from chromosome 1, leaving 270648.
+Pruned 196053 variants from chromosome 42, leaving 160333.
+Pruned 427939 variants from chromosome 2, leaving 305083.
+Pruned 330071 variants from chromosome 3, leaving 254552.
+Pruned 94600 variants from chromosome 4, leaving 67774.
+Pruned 22082 variants from chromosome 43, leaving 48315.
+Pruned 182100 variants from chromosome 5, leaving 142000.
+Pruned 120481 variants from chromosome 6, leaving 128590.
+Pruned 121308 variants from chromosome 7, leaving 123774.
+Pruned 90473 variants from chromosome 8, leaving 105348.
+Pruned 83535 variants from chromosome 9, leaving 103593.
+Pruned 59270 variants from chromosome 10, leaving 74843.
+Pruned 59267 variants from chromosome 11, leaving 64841.
+Pruned 61133 variants from chromosome 12, leaving 86839.
+Pruned 50139 variants from chromosome 13, leaving 75981.
+Pruned 44431 variants from chromosome 14, leaving 69422.
+Pruned 25165 variants from chromosome 17, leaving 52743.
+Pruned 26155 variants from chromosome 18, leaving 48744.
+Pruned 25669 variants from chromosome 19, leaving 50799.
+Pruned 37350 variants from chromosome 20, leaving 66934.
+Pruned 15587 variants from chromosome 21, leaving 31922.
+Pruned 8010 variants from chromosome 22, leaving 23766.
+Pruned 11715 variants from chromosome 23, leaving 33495.
+Pruned 15050 variants from chromosome 24, leaving 41120.
+Pruned 1848 variants from chromosome 25, leaving 7197.
+Pruned 10465 variants from chromosome 26, leaving 30860.
+Pruned 8806 variants from chromosome 27, leaving 18622.
+Pruned 7278 variants from chromosome 28, leaving 21999.
+Pruned 1680 variants from chromosome 29, leaving 3517.
+Pruned 251 variants from chromosome 31, leaving 203.
+Pruned 136 variants from chromosome 32, leaving 147.
+Pruned 0 variants from chromosome 33, leaving 6.
+Pruned 75 variants from chromosome 34, leaving 35.
+Pruned 643 variants from chromosome 35, leaving 2344.
+Pruned 286 variants from chromosome 36, leaving 328.
+Pruned 115 variants from chromosome 37, leaving 334.
+Pruning complete.  2468648 of 4985699 variants removed.
+Marker lists written to
+/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowWGS_168/1_Population_Structure/0_LD_prunning/HR.168.ld.prune.in
+and
+/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowWGS_168/1_Population_Structure/0_LD_prunning/HR.168.ld.prune.out
+.
+
+End time: Wed Mar 19 13:44:25 2025

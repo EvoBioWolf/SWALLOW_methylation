@@ -1,0 +1,1 @@
+awk '$3 >= 0.9 && $3 != "-nan"' /dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowWGS_168/1_Population_Structure/3_FST/1_vcftools/1_results/R_r_T_FST.weir.fst > 1_RT_ancestry_snps_fst9.txt

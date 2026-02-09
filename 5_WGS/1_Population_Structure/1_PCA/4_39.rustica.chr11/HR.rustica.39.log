@@ -1,0 +1,59 @@
+PLINK v1.90b6.21 64-bit (19 Oct 2020)
+Options in effect:
+  --allow-extra-chr
+  --allow-no-sex
+  --chr 11
+  --chr-set 37 no-xy
+  --double-id
+  --from-bp 18200001
+  --keep /dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowWGS_168/1_Population_Structure/1_PCA/4_39.rustica.chr11/0_keep_inds.txt
+  --keep-allele-order
+  --make-bed
+  --out /dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowWGS_168/1_Population_Structure/1_PCA/4_39.rustica.chr11/HR.rustica.39
+  --pca
+  --set-missing-var-ids @:#
+  --to-bp 21491856
+  --vcf /dss/dsslegfs01/pr53da/pr53da-dss-0034/vcf/merged/HR.168.biallelic.maf05.dp_3_60.vcf.gz
+
+Hostname: hlegr1409n12
+Working directory: /dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowWGS_168/1_Population_Structure/1_PCA/4_39.rustica.chr11
+Start time: Fri May  2 10:21:38 2025
+
+Random number seed: 1746174098
+3095974 MB RAM detected; reserving 1547987 MB for main workspace.
+--vcf:
+/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowWGS_168/1_Population_Structure/1_PCA/4_39.rustica.chr11/HR.rustica.39-temporary.bed
++
+/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowWGS_168/1_Population_Structure/1_PCA/4_39.rustica.chr11/HR.rustica.39-temporary.bim
++
+/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowWGS_168/1_Population_Structure/1_PCA/4_39.rustica.chr11/HR.rustica.39-temporary.fam
+written.
+(4861591 variants skipped.)
+17392 out of 124108 variants loaded from .bim file.
+17392 missing IDs set.
+168 samples (0 males, 0 females, 168 ambiguous) loaded from .fam.
+Ambiguous sex IDs written to
+/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowWGS_168/1_Population_Structure/1_PCA/4_39.rustica.chr11/HR.rustica.39.nosex
+.
+--keep: 39 samples remaining.
+Using up to 71 threads (change this with --threads).
+Before main variant filters, 39 founders and 0 nonfounders present.
+Calculating allele frequencies... done.
+Total genotyping rate in remaining samples is 0.994443.
+17392 variants and 39 samples pass filters and QC.
+Note: No phenotypes present.
+Relationship matrix calculation complete.
+--pca: Results saved to
+/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowWGS_168/1_Population_Structure/1_PCA/4_39.rustica.chr11/HR.rustica.39.eigenval
+and
+/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowWGS_168/1_Population_Structure/1_PCA/4_39.rustica.chr11/HR.rustica.39.eigenvec
+.
+--make-bed to
+/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowWGS_168/1_Population_Structure/1_PCA/4_39.rustica.chr11/HR.rustica.39.bed
++
+/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowWGS_168/1_Population_Structure/1_PCA/4_39.rustica.chr11/HR.rustica.39.bim
++
+/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowWGS_168/1_Population_Structure/1_PCA/4_39.rustica.chr11/HR.rustica.39.fam
+... done.
+
+End time: Fri May  2 10:22:00 2025

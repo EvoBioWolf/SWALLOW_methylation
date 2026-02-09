@@ -1,0 +1,57 @@
+PLINK v1.90b6.21 64-bit (19 Oct 2020)
+Options in effect:
+  --allow-extra-chr
+  --allow-no-sex
+  --autosome
+  --chr-set 37 no-xy
+  --double-id
+  --keep /dss/dsshome1/lxc0B/ra52qed/gitlab/swallow.projects/scripts/2_WGS/1_Genetic_Data_168/1_Population_Structure/0.PCA/keep.83.txt
+  --keep-allele-order
+  --make-bed
+  --out /dss/dsshome1/lxc0B/ra52qed/gitlab/swallow.projects/scripts/2_WGS/1_Genetic_Data_168/1_Population_Structure/0.PCA/HR.83
+  --pca
+  --set-missing-var-ids @:#
+  --vcf /dss/dsslegfs01/pr53da/pr53da-dss-0034/vcf/merged/HR.168.filtered.sort.pruned.vcf.gz
+
+Hostname: hlegr1409n03
+Working directory: /dss/dsshome1/lxc0B/ra52qed
+Start time: Fri Nov  3 18:26:55 2023
+
+Random number seed: 1699032415
+386468 MB RAM detected; reserving 193234 MB for main workspace.
+--vcf:
+/dss/dsshome1/lxc0B/ra52qed/gitlab/swallow.projects/scripts/2_WGS/1_Genetic_Data_168/1_Population_Structure/0.PCA/HR.83-temporary.bed
++
+/dss/dsshome1/lxc0B/ra52qed/gitlab/swallow.projects/scripts/2_WGS/1_Genetic_Data_168/1_Population_Structure/0.PCA/HR.83-temporary.bim
++
+/dss/dsshome1/lxc0B/ra52qed/gitlab/swallow.projects/scripts/2_WGS/1_Genetic_Data_168/1_Population_Structure/0.PCA/HR.83-temporary.fam
+written.
+(338865 variants skipped.)
+3879251 variants loaded from .bim file.
+3879251 missing IDs set.
+168 samples (0 males, 0 females, 168 ambiguous) loaded from .fam.
+Ambiguous sex IDs written to
+/dss/dsshome1/lxc0B/ra52qed/gitlab/swallow.projects/scripts/2_WGS/1_Genetic_Data_168/1_Population_Structure/0.PCA/HR.83.nosex
+.
+--keep: 83 samples remaining.
+Using up to 79 threads (change this with --threads).
+Before main variant filters, 83 founders and 0 nonfounders present.
+Calculating allele frequencies... done.
+Total genotyping rate in remaining samples is 0.866388.
+3879251 variants and 83 samples pass filters and QC.
+Note: No phenotypes present.
+Relationship matrix calculation complete.
+--pca: Results saved to
+/dss/dsshome1/lxc0B/ra52qed/gitlab/swallow.projects/scripts/2_WGS/1_Genetic_Data_168/1_Population_Structure/0.PCA/HR.83.eigenval
+and
+/dss/dsshome1/lxc0B/ra52qed/gitlab/swallow.projects/scripts/2_WGS/1_Genetic_Data_168/1_Population_Structure/0.PCA/HR.83.eigenvec
+.
+--make-bed to
+/dss/dsshome1/lxc0B/ra52qed/gitlab/swallow.projects/scripts/2_WGS/1_Genetic_Data_168/1_Population_Structure/0.PCA/HR.83.bed
++
+/dss/dsshome1/lxc0B/ra52qed/gitlab/swallow.projects/scripts/2_WGS/1_Genetic_Data_168/1_Population_Structure/0.PCA/HR.83.bim
++
+/dss/dsshome1/lxc0B/ra52qed/gitlab/swallow.projects/scripts/2_WGS/1_Genetic_Data_168/1_Population_Structure/0.PCA/HR.83.fam
+... done.
+
+End time: Fri Nov  3 18:28:42 2023

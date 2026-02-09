@@ -1,0 +1,593 @@
+---
+title: "pi, dxy, and fst stats"
+author: "Sarah Mueller"
+date: "2024 September"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    toc_collapsed: true
+    toc_depth: 4
+    theme: lumen
+    code_folding: hide
+editor_options: 
+  chunk_output_type: inline
+---
+
+## Input files 
+
+We firstly obtained a vcf containing variant and invariant sites using the grenepipe pipeline. Afterwards, we filter only by depth and and missingnes: 
+
+```{bash ,eval=FALSE}
+# set filters
+MISS=0.8
+MIN_DP=10
+MAX_DP=500
+
+vcftools --gzvcf $vcfin \
+         --remove-indels \
+         --max-missing $MISS \
+         --min-meanDP $MIN_DP \
+         --max-meanDP $MAX_DP \
+         --remove $list \
+         --recode --stdout > $vcfout
+```
+
+
+Then we ran pixy with following command:
+
+```{r, eval=FALSE, echo=FALSE, message=FALSE, warning=FALSE}
+
+# Calculate stats using pixy
+pixy --stats pi fst dxy \
+     --vcf $vcfin \
+     --n_cores 15 \
+     --populations $popmap \
+     --window_size 1000 \
+     --bypass_invariant_check 'yes' \
+     --output_folder /dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowWGS_168/1_Population_Structure/4_pixy \
+     --output_prefix $out
+
+
+```
+
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# preparation --------
+.libPaths(c(.libPaths(),"/dss/dsshome1/lxc0B/ra52qed/R/x86_64-pc-linux-gnu-library/4.2"))
+library(ggplot2)
+library(tidyverse)
+library(plotly)
+library(gghalves)
+library(ggpubr)
+library(ggdist)
+library(rstatix)
+
+
+# functions ----------
+
+###convert a list of pixy output files to a single long format data frame.
+pixy_to_long <- function(pixy_files){
+
+  pixy_df <- list()
+
+  for(i in 1:length(pixy_files)){
+
+    stat_file_type <- gsub(".*_|.txt", "", pixy_files[i])
+
+    if(stat_file_type == "pi"){
+
+      df <- read_delim(pixy_files[i], delim = "\t")
+      df <- df %>%
+        gather(-pop, -window_pos_1, -window_pos_2, -chromosome,
+               key = "statistic", value = "value") %>%
+        dplyr::rename(pop1 = pop) %>%
+        mutate(pop2 = NA)
+
+      pixy_df[[i]] <- df
+
+
+    } else{
+
+      df <- read_delim(pixy_files[i], delim = "\t")
+      df <- df %>%
+        gather(-pop1, -pop2, -window_pos_1, -window_pos_2, -chromosome,
+               key = "statistic", value = "value")
+      pixy_df[[i]] <- df
+
+    }
+
+  }
+
+  bind_rows(pixy_df) %>%
+    arrange(pop1, pop2, chromosome, window_pos_1, statistic)
+
+}
+
+plot.stats <- function(pixy_df, clrs){
+    # create a custom labeller for special characters in pi/dxy/fst
+    pixy_labeller <- as_labeller(c(avg_dxy = "D[XY]",
+                                 avg_wc_fst = "F[ST]"),
+                                 default = label_parsed)
+    
+    # plotting summary statistics across all chromosomes
+    pixy_df %>%
+          filter(statistic %in% c("avg_dxy", "avg_wc_fst")) %>%
+          filter(grepl('chr', chromosome))%>%
+          filter(!grepl('random', chromosome))%>%
+      filter(!(chromosome %in% c("chrW")))%>%
+          drop_na(value) %>%
+          ggplot(aes(x = (window_pos_1 + window_pos_2)/2, y = value, color = chromosome))+
+          geom_point(size = 1, alpha = 0.5, stroke = 0)+
+          facet_grid(statistic ~ chromosome,
+                     scales = "free", switch = "x", space = "free_x",
+                     labeller = labeller(statistic = pixy_labeller,
+                                         value = label_value))+
+          xlab("Chromsome")+
+          ylab("Statistic Value")+
+          scale_color_manual(values =rep(clrs,ceiling((length(pixy_df$chromosome)/2))))+
+          theme_classic()+
+          theme(axis.text.x = element_blank(),
+                axis.ticks.x = element_blank(),
+                panel.spacing = unit(0.01, "cm"),
+                strip.background = element_blank(),
+                strip.placement = "outside",
+                strip.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+                legend.position ="none")+
+          scale_x_continuous(expand = c(0, 0)) +
+          scale_y_continuous(expand = c(0, 0), limits = c(0,NA))
+
+}
+
+plot.stats.dxy <- function(pixy_df, lab){
+    # create a custom labeller for special characters in pi/dxy/fst
+    pixy_labeller <- as_labeller(c(avg_dxy = ""),
+                                 default = label_parsed)
+    
+    # plotting summary statistics across all chromosomes
+    pixy_df %>%
+          filter(statistic %in% c("avg_dxy")) %>%
+          filter(grepl('chr', chromosome))%>%
+          filter(!grepl('random', chromosome))%>%
+      filter(!(chromosome %in% c("chrW")))%>%
+          drop_na(value) %>%
+          ggplot(aes(x = (window_pos_1 + window_pos_2)/2, y = value, color = chromosome))+
+          geom_point(size = 0.7, alpha = 0.5, stroke = 0)+
+          facet_grid(. ~ chromosome,
+                     scales = "free", switch = "x", space = "free_x")+
+          xlab("")+
+          ylab("")+
+          ggtitle("") +
+          scale_color_manual(values =rep(c("#E7C6AE","#D58544"),ceiling((length(pixy_df$chromosome)/2))))+
+          theme_classic()+
+          theme(axis.text.x = element_blank(),
+                axis.ticks.x = element_blank(),
+                panel.spacing = unit(0.01, "cm"),
+                strip.background = element_blank(),
+                strip.placement = "outside",
+                strip.text.x = element_blank(),
+                legend.position ="none")+
+          scale_x_continuous(expand = c(0, 0)) +
+          scale_y_continuous(expand = c(0, 0), limits = c(0,NA))
+
+}
+
+plot.stats.fst <- function(pixy_df, lab){
+    # create a custom labeller for special characters in pi/dxy/fst
+    pixy_labeller <- as_labeller(c(avg_wc_fst = ""),
+                                 default = label_parsed)
+    
+    # plotting summary statistics across all chromosomes
+    pixy_df %>%
+          filter(statistic %in% c("avg_wc_fst")) %>%
+          filter(grepl('chr', chromosome))%>%
+          filter(!grepl('random', chromosome))%>%
+      filter(!(chromosome %in% c("chrW")))%>%
+          drop_na(value) %>%
+          ggplot(aes(x = (window_pos_1 + window_pos_2)/2, y = value, color = chromosome))+
+          geom_point(size = 0.7, alpha = 0.5, stroke = 0)+
+          facet_grid(. ~ chromosome,
+                     scales = "free", switch = "x", space = "free_x")+
+          xlab("")+
+          ylab("")+
+          scale_color_manual(values =rep(c("#E7C6AE","#5E97BC"),ceiling((length(pixy_df$chromosome)/2))))+
+          theme_classic()+
+          theme(axis.text.x = element_blank(),
+                axis.ticks.x = element_blank(),
+                panel.spacing = unit(0.01, "cm"),
+                strip.background = element_blank(),
+                strip.placement = "outside",
+                strip.text.x = element_blank(),
+                legend.position ="none")+
+          scale_x_continuous(expand = c(0, 0)) +
+          scale_y_continuous(expand = c(0, 0), limits = c(0,NA))
+
+}
+
+plot.stats.fst2 <- function(pixy_df){
+    # create a custom labeller for special characters in pi/dxy/fst
+    pixy_labeller <- as_labeller(c(avg_wc_fst = ""),
+                                 default = label_parsed)
+    
+    # plotting summary statistics across all chromosomes
+    pixy_df %>%
+          filter(statistic %in% c("avg_wc_fst")) %>%
+          filter(grepl('chr', chromosome))%>%
+          filter(!grepl('random', chromosome))%>%
+      filter(!(chromosome %in% c("chrW")))%>%
+          drop_na(value) %>%
+          ggplot(aes(x = (window_pos_1 + window_pos_2)/2, y = value, color = chromosome))+
+          geom_point(size = 0.7, alpha = 0.5, stroke = 0)+
+          facet_grid(duo ~ chromosome,
+                     scales = "free", switch = "x", space = "free_x")+
+          xlab("")+
+          ylab("")+
+          scale_color_manual(values =rep(c("#E7C6AE","#5E97BC"),ceiling((length(pixy_df$chromosome)/2))))+
+          theme_classic()+
+          theme(axis.text.x = element_blank(),
+                axis.ticks.x = element_blank(),
+                panel.spacing = unit(0.01, "cm"),
+                strip.background = element_blank(),
+                strip.placement = "outside",
+                strip.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+                legend.position ="none")+
+          scale_x_continuous(expand = c(0, 0)) +
+          scale_y_continuous(expand = c(0, 0), limits = c(0,NA))
+
+}
+
+plot.stats.chr <- function(pixy_df, chr){
+    # create a custom labeller for special characters in pi/dxy/fst
+    pixy_labeller <- as_labeller(c(avg_dxy = "D[XY]",
+                                 avg_wc_fst = "F[ST]"),
+                                 default = label_parsed)
+    
+    # plotting summary statistics across all chromosomes
+    pixy_df %>%
+          filter(chromosome == chr) %>%
+          filter(statistic %in% c("avg_dxy", "avg_wc_fst")) %>%
+          drop_na(value) %>%
+          ggplot(aes(x = (window_pos_1 + window_pos_2)/2, y = value, color = chromosome))+
+          geom_point(size = 1.2, alpha = 0.7, stroke = 0)+
+          facet_grid(statistic ~ .,
+                     scales = "free_y", switch = "x", space = "free_x",
+                     labeller = labeller(statistic = pixy_labeller,
+                                         value = label_value))+
+          xlab("Position Mb")+
+          ylab("Statistic Value")+
+          scale_color_manual(values= c("#5E97BC"))+
+          theme_bw()+
+          theme(axis.text.x = element_blank(),
+                axis.ticks.x = element_blank(),
+                panel.spacing = unit(0.01, "cm"),
+                strip.background = element_blank(),
+                strip.placement = "outside",
+                strip.text.x = element_blank(),
+                legend.position ="none",
+                panel.grid.major = element_blank(), 
+                panel.grid.minor = element_blank())+
+          scale_x_continuous(expand = c(0, 0)) +
+          scale_y_continuous(expand = c(0, 0), limits = c(0,NA))
+
+}
+
+plot.stats.html <- function(pixy_df) {
+   
+   stats <- c("avg_dxy", "avg_wc_fst")
+    plt <- htmltools::tagList()
+    i <- 1
+    
+    for (stat in stats){
+      
+        plot <- pixy_df %>%
+                    filter(statistic %in% c(stat)) %>%  
+                    filter(grepl('chr', chromosome))%>%
+                    filter(!grepl('random', chromosome))%>%
+                    drop_na(value) %>%
+                    ggplot(aes(x = (window_pos_1 + window_pos_2)/2, y = value, color = chromosome))+
+                        geom_point(size = 0.7, alpha = 0.5, stroke = 0)+
+                        facet_grid( .~ chromosome,
+                                   scales = "free", switch = "x", space = "free_x")+
+                        labs(title=stat) +
+                        xlab("Chromosomes")+
+                        ylab("Statistic Value")+
+                        scale_color_manual(values=rep(c("#E7C6AE","#5E97BC"),ceiling((length(pixy_df$chromosome)/2))))+
+                        theme_classic()+
+                        theme(panel.spacing = unit(0.01, "cm"),
+                              axis.text.x = element_blank(),
+                              axis.ticks.x = element_blank(),
+                              strip.background = element_blank(),
+                              strip.placement = "outside",
+                              legend.position ="none",
+                              strip.text.x = element_blank())+
+                        scale_x_continuous(expand = c(0, 0)) +
+                        scale_y_continuous(expand = c(0, 0), limits = c(0,NA))
+        plt[[i]] <- as_widget(ggplotly(plot))
+        i <- i + 1
+    
+        }
+    
+    
+    return(plt)
+}
+```
+
+## All pops (50 kb)
+
+```{r, message=FALSE, warning=FALSE}
+# def variables --------
+path <- "/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowWGS_168/1_Population_Structure/4_pixy"
+cols_sub <-  c( "#213B82", #G
+                "#aa0a0f", #R
+                "#9716a8", #RG
+                "#FFA500", #RT
+                "#00B5B8", #E
+                "#734a0e", #S
+                "#A0825A", #TV
+                "#FFEF00", #T
+                "grey") #NA/unknown
+
+#main ----------------------
+setwd(path)
+
+#Convert to long format
+pixy_files <- list.files("./HR.168.invariant", full.names = TRUE)
+pixy_df <- pixy_to_long(pixy_files)
+
+
+```
+
+```{r, echo=F,eval=F,include=F}
+pixy_df %>%
+          filter(statistic %in% c("avg_pi"))%>%
+          filter(grepl('chr', chromosome))%>%
+          filter(!grepl('random', chromosome))%>%
+          drop_na(value) %>%
+          ggplot(aes(x = (window_pos_1 + window_pos_2)/2, y = value, color = chromosome))+
+              geom_point(size = 0.7, alpha = 0.5, stroke = 0)+
+              facet_grid( pop1~ chromosome,
+                         scales = "free_x", switch = "x", space = "free_x")+
+              xlab("Chromosomes")+
+              ylab(expression(pi))+
+              scale_color_manual(values=rep(c("#E7C6AE","#5E97BC"),ceiling((length(pixy_df$chromosome)/2))))+
+              theme_classic()+
+              theme(panel.spacing = unit(0.0001, "cm"),
+                    axis.text.x = element_blank(),
+                    axis.ticks.x = element_blank(),
+                    strip.background = element_blank(),
+                    strip.placement = "outside",
+                    legend.position ="none",
+                    strip.text.x = element_blank())+
+              scale_y_continuous(limits = c(0,0.06)) +
+  scale_x_continuous(expand = c(0, 0))
+
+```
+
+
+#### Genome-wide plot of summary statistic (pairwise)
+
+```{r, warning=FALSE}
+
+#plot.stats.html(pixy_df)
+
+pixy_df_rg <- pixy_df %>%
+                filter(pop1 %in% c("gutturalis")) %>%
+                filter(pop2 %in% c("rustica.r")) 
+
+
+plot.stats(pixy_df_rg,c("#E7C6AE","#7C98B3"))
+
+pixy_df_tvr <- pixy_df %>%
+                filter(pop1 %in% c("transitiva")) %>%
+                filter(pop2 %in% c("rustica.r"))
+
+
+plot.stats(pixy_df_tvr,c("#E7C6AE","#7C98B3"))
+
+
+pixy_df_tve <- pixy_df %>%
+                filter(pop1 %in% c("erythrogaster")) %>%
+                filter(pop2 %in% c("transitiva"))
+
+
+plot.stats(pixy_df_tve,c("#E7C6AE","#7C98B3"))
+
+pixy_df_tvg <- pixy_df %>%
+                filter(pop1 %in% c("gutturalis")) %>%
+                filter(pop2 %in% c("transitiva"))
+
+
+plot.stats(pixy_df_tvg,c("#E7C6AE","#7C98B3"))
+
+
+```
+Focus on chromosome 05, because this shows peaks in all
+
+```{r, warning=FALSE}
+
+#plot.stats.html(pixy_df)
+
+pixy_df_rg <- pixy_df %>%
+                filter(pop1 %in% c("gutturalis")) %>%
+                filter(pop2 %in% c("rustica.r")) %>%
+                filter(chromosome %in% c("chr05")) 
+
+
+plot.stats(pixy_df_rg,c("#E7C6AE","#7C98B3"))
+
+pixy_df_rt <- pixy_df %>%
+                filter(pop1 %in% c("rustica.r")) %>%
+                filter(pop2 %in% c("tytleri"))%>%
+                filter(chromosome %in% c("chr05")) 
+
+
+plot.stats(pixy_df_rt,c("#E7C6AE","#7C98B3"))
+
+
+pixy_df_tve <- pixy_df %>%
+                filter(pop1 %in% c("erythrogaster")) %>%
+                filter(pop2 %in% c("transitiva")) %>%
+                filter(chromosome %in% c("chr05")) 
+
+
+plot.stats(pixy_df_tve,c("#E7C6AE","#7C98B3"))
+
+pixy_df_tvg <- pixy_df %>%
+                filter(pop1 %in% c("gutturalis")) %>%
+                filter(pop2 %in% c("transitiva")) %>%
+                filter(chromosome %in% c("chr05")) 
+
+
+plot.stats(pixy_df_tvg,c("#E7C6AE","#7C98B3"))
+
+
+```
+
+### close up into selected chr
+
+```{r}
+plot.stats.chr(pixy_df, "chr01A")
+```
+
+
+```{r}
+plot.stats.chr(pixy_df, "chr05")
+```
+
+
+```{r}
+plot.stats.chr(pixy_df, "chr03")
+```
+
+```{r}
+pixy_df  %>% 
+  filter(!(chromosome %in% c("chrW")))%>%
+  filter(statistic %in% c("avg_wc_fst")) %>%
+  get_summary_stats(value)
+
+pixy_df  %>% 
+  filter(!(chromosome %in% c("chrW")))%>%
+  filter(statistic %in% c("avg_dxy")) %>%
+  get_summary_stats(value)
+
+```
+
+
+### close up into selected chr
+
+```{r}
+plot.stats.chr(pixy_df, "chr17")
+```
+
+#### pi per population
+
+```{r, echo=F,include=F}
+
+# Plot pi for each population found in the input file
+pops <- unique(pixy_df$pop1)
+plt <- htmltools::tagList()
+i <- 1
+
+for (p in pops){
+  
+    plot <- pixy_df %>%
+                filter(pop1 %in% c(p)) %>%  
+                filter(statistic %in% c("avg_pi"))%>%
+                filter(grepl('chr', chromosome))%>%
+                filter(!grepl('random', chromosome))%>%
+                drop_na(value) %>%
+                ggplot(aes(x = (window_pos_1 + window_pos_2)/2, y = value, color = chromosome))+
+                    geom_point(size = 0.7, alpha = 0.5, stroke = 0)+
+                    facet_grid( .~ chromosome,
+                               scales = "free", switch = "x", space = "free_x")+
+                    labs(title=p) +
+                    xlab("Chromosomes")+
+                    ylab("Nucleotide diversity (pi)")+
+                    scale_color_manual(values=rep(c("#E7C6AE","#5E97BC"),ceiling((length(pixy_df$chromosome)/2))))+
+                    theme_classic()+
+                    theme(panel.spacing = unit(0.00001, "cm"),
+                          axis.text.x = element_blank(),
+                          axis.ticks.x = element_blank(),
+                          strip.background = element_blank(),
+                          strip.placement = "outside",
+                          legend.position ="none",
+                          strip.text.x = element_blank())+
+                    scale_y_continuous(limits = c(0,0.06)) +
+                    scale_x_continuous(expand = c(0, 0))
+    plt[[i]] <- as_widget(ggplotly(plot))
+    i <- i + 1
+
+    }
+
+
+plt
+
+```
+
+
+```{r, warning=F}
+pixy_df %>%
+          filter(statistic %in% c("avg_pi"))%>%
+          filter(grepl('chr', chromosome))%>%
+          filter(!grepl('random', chromosome))%>%
+          drop_na(value) %>%
+          ggplot(aes(x = (window_pos_1 + window_pos_2)/2, y = value, color = chromosome))+
+              geom_point(size = 0.7, alpha = 0.5, stroke = 0)+
+              facet_grid( pop1~ chromosome,
+                         scales = "free_x", switch = "x", space = "free_x")+
+              xlab("Chromosomes")+
+              ylab(expression(pi))+
+              scale_color_manual(values=rep(c("#E7C6AE","#5E97BC"),ceiling((length(pixy_df$chromosome)/2))))+
+              theme_classic()+
+              theme(panel.spacing = unit(0.0001, "cm"),
+                    axis.text.x = element_blank(),
+                    axis.ticks.x = element_blank(),
+                    strip.background = element_blank(),
+                    strip.placement = "outside",
+                    legend.position ="none",
+                    strip.text.x = element_blank())+
+              scale_y_continuous(limits = c(0,0.06)) +
+  scale_x_continuous(expand = c(0, 0))
+
+```
+
+#### Genome-wide plot of summary statistic (pairwise)
+
+```{r, warning=FALSE}
+
+#plot.stats.html(pixy_df)
+
+pixy_df_sf <- pixy_df %>%
+                filter(pop1 %in% c("erythrogaster")) %>%
+                filter(pop2 %in% c("transitiva"))
+
+
+plot.stats(pixy_df_sf, c("#7C98B3","#E5625E"))
+fst.sf <- plot.stats.fst(pixy_df_sf, "E vs TV")
+dxy.sf <- plot.stats.dxy(pixy_df_sf, "E vs TV")
+
+pixy_df_sg <- pixy_df %>%
+                filter(pop1 %in% c("gutturalis")) %>%
+                filter(pop2 %in% c("transitiva"))
+
+
+plot.stats(pixy_df_sg,c("#E7C6AE","#E5625E"))
+fst.sg <- plot.stats.fst(pixy_df_sg, "G vs TV")
+dxy.sg <- plot.stats.dxy(pixy_df_sg, "G vs TV")
+
+
+pixy_df_gf <- pixy_df %>%
+                filter(pop1 %in% c("gutturalis")) %>%
+                filter(pop2 %in% c("rustica.r"))
+
+
+plot.stats(pixy_df_gf,c("#E7C6AE","#7C98B3"))
+fst.gf <- plot.stats.fst(pixy_df_gf, "G vs Rr")
+dxy.gf <- plot.stats.dxy(pixy_df_gf, "G vs Rr")
+
+
+
+```
+
+
