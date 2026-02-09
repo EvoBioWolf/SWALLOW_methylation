@@ -1,0 +1,609 @@
+---
+title: "PST-Genetic variation comparison - CPG islands"
+author: "Sarah Mueller"
+date: "2024-Oct"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+### Libraries
+.libPaths(c(.libPaths(),"/dss/dsshome1/lxc0B/ra52qed/R/x86_64-pc-linux-gnu-library/4.2"))
+
+library(vegan)
+library(ggplot2)
+library(plyr)
+library(broom)
+library(readxl)
+library(cluster)
+library(ape)
+library(ggrepel)
+library(knitr)
+library(ggvenn)
+library(tidyr)
+library(dplyr)
+library(ggpmisc)
+library(gridExtra)
+library(wesanderson)
+library(stringr)
+```
+
+## PST vs. DXY comparison
+
+DXY calculated on an invariant vcf file (10,000 bp windows) see (/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowWGS_168/1_Population_Structure/4_pixy/HR.168.invariant) then a whole genome average was calculated (see /dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowWGS_168/1_Population_Structure/4_pixy/2_DXY/1_calculate_average_dxy.sh) compared to PST calculated per loci averaged across the whole genome. Here I want to run a correlation between the two. Each point represents one population comparison of PST and genetic variation (FST/DXY).
+
+```{r message=FALSE, warning=FALSE}
+
+#load in just one population comparison first
+pst.gw <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/0_cpgi_pst/0_pst_cpgi_c05.txt", header=T)
+
+#sample names
+sample_names <- read.table("/dss/dsshome1/lxc0B/ra52qed/gitlab/swallow.projects/scripts/0_sample.lists/sample.names.85.txt")
+#add sample pops
+sample_names <- sample_names %>%
+  mutate(pop = case_when(
+    grepl("RU_13_R_", V1) ~ "rustica.r",
+    grepl("CH_", V1) ~ "rustica.eu",
+    grepl("DE_", V1) ~ "rustica.eu",
+    grepl("FI", V1) ~ "rustica.eu",
+    grepl("_G_", V1) ~ "gutturalis",
+    grepl("_E_", V1) ~ "erythrogaster",
+    grepl("_S_", V1) ~ "savignii",
+    grepl("_TV_", V1) ~ "transitiva",
+    grepl("_T_", V1) ~ "tytleri"))
+
+##Create a list of comparisons
+pop.list <- as.data.frame(unique(as.vector(sample_names$pop)))
+colnames(pop.list) <- c("pop1")
+pop.combo <- tidyr::crossing(var1=pop.list$pop1, var2=pop.list$pop1)
+pop.combo <- pop.combo[c(2:7, 10:14, 18:21,26:28, 34:35,42),]
+
+#Get average values across all sites
+numeric_columns <- pst.gw[sapply(pst.gw, is.numeric)]
+
+# Calculate the average (mean) of all numeric columns
+column_means <- colMeans(numeric_columns, na.rm = TRUE)
+
+# Create a new dataframe with the column names and their corresponding means
+mean_df <- data.frame(
+  Pops = names(pst.gw[,-1]),
+  Mean = column_means
+)
+
+mean_df$Pops <- gsub("\\.pst", "", mean_df$Pops)
+
+#load DXY
+dxy.gw <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/5_WGS/1_Population_Structure/4_pixy/2_DXY/1_dxy_avg_gw.txt", header=T)
+colnames(dxy.gw) <- c("Pop1", "Pop2","avg_dxy")
+fst.gw <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/5_WGS/1_Population_Structure/4_pixy/2_FST/1_fst_avg_gw.txt", header=T)
+colnames(fst.gw) <- c("Pop1", "Pop2","avg_fst")
+fst.islands <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/5_WGS/1_Population_Structure/4_pixy/2_FST/4_fst_cpgi_pop.txt", header=T)
+colnames(fst.islands) <- c("Pop1", "Pop2","avg_fst")
+fst.opensea <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/5_WGS/1_Population_Structure/4_pixy/2_FST/4_fst_opensea_pop.txt", header=T)
+colnames(fst.opensea) <- c("Pop1", "Pop2","avg_fst")
+fst.shore <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/5_WGS/1_Population_Structure/4_pixy/2_FST/4_fst_shore_pop.txt", header=T)
+colnames(fst.shore) <- c("Pop1", "Pop2","avg_fst")
+pi.gw <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/5_WGS/1_Population_Structure/4_pixy/2_PI/1_pi_avg_gw.txt", header=T)
+colnames(pi.gw) <- c("Pop1", "avg_pi")
+
+#pop key function
+generate_pop_key <- function(pop1, pop2) {
+  sorted_pops <- sort(c(as.character(pop1), as.character(pop2)))
+  return(paste(sorted_pops[1], sorted_pops[2], sep = "_"))
+}
+
+#add pop_key to all genetic dataframes
+dxy.gw <- dxy.gw %>%
+  rowwise() %>%
+  mutate(pop_key = generate_pop_key(Pop1, Pop2))
+fst.gw <- fst.gw %>%
+  rowwise() %>%
+  mutate(pop_key = generate_pop_key(Pop1, Pop2))
+fst.islands <- fst.islands %>%
+  rowwise() %>%
+  mutate(pop_key = generate_pop_key(Pop1, Pop2))
+fst.opensea <- fst.opensea %>%
+  rowwise() %>%
+  mutate(pop_key = generate_pop_key(Pop1, Pop2))
+fst.shore <- fst.shore %>%
+  rowwise() %>%
+  mutate(pop_key = generate_pop_key(Pop1, Pop2))
+
+```
+
+Next we can load in the homer files, as we may also want to explore the relationships between the different genomic annotations
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+#Dataset 1: 
+#import homer output
+homer.cpgi.prop.20miss <- read.delim("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_Pre-processing/4_methyl_calling/1_CpG_islands/168.20miss/homer.cpgi.prop.168.merged.20miss.rmlowv.rmout.txt", sep = "\t", header=T)
+
+#join pst and homer
+joined.20miss <- right_join(pst.gw, homer.cpgi.prop.20miss, by = c("site.id" = "region.id"))
+summary(as.factor(joined.20miss$Annotation))
+
+joined.20miss$Annotation <- trimws(joined.20miss$Annotation)
+joined.20miss$Annotation <- trimws(joined.20miss$category)
+
+#remove trailing spaces
+joined.20miss <- joined.20miss %>%
+  mutate(category = str_trim(category, side = "right"))
+
+# Calculate means for the opensea dataframe
+opensea.20miss <- joined.20miss %>%
+  filter(grepl("opensea", category))
+
+opensea_column_means <- colMeans(opensea.20miss[, 2:22], na.rm = TRUE)
+
+opensea_mean_df <- data.frame(
+  Pops = names(opensea.20miss[, 2:22]),
+  Mean = opensea_column_means
+)
+opensea_mean_df$Pops <- gsub("\\.pst", "", opensea_mean_df$Pops)
+
+# Calculate means for the island dataframe
+island.20miss <- joined.20miss %>%
+  filter(grepl("island", category))
+
+island_column_means <- colMeans(island.20miss[, 2:22], na.rm = TRUE)
+
+island_mean_df <- data.frame(
+  Pops = names(island.20miss[, 2:22]),
+  Mean = island_column_means
+)
+island_mean_df$Pops <- gsub("\\.pst", "", island_mean_df$Pops)
+
+# Calculate means for the shore dataframe
+shore.20miss <- joined.20miss %>%
+  filter(grepl("shore", category))
+
+shore_column_means <- colMeans(shore.20miss[, 2:22], na.rm = TRUE)
+
+shore_mean_df <- data.frame(
+  Pops = names(shore.20miss[, 2:22]),
+  Mean = shore_column_means
+)
+shore_mean_df$Pops <- gsub("\\.pst", "", shore_mean_df$Pops)
+
+```
+
+Save output 
+```{r}
+#make this table 
+#write.table(joined.20miss, file="/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST_FST_gw/1_pst_homer/1_pst_homer_cpgi_85_20miss.txt", sep="\t", quote=F, row.names=F)
+```
+## For only islands:
+```{r}
+pst_columns <- grep("\\.pst$", colnames(island.20miss), value = TRUE)
+
+# Calculate the average pst values per unique entry in the 'category' column
+average_pst_by_category <- island.20miss %>%
+  dplyr::select(category, all_of(pst_columns)) %>%  # Select 'category' and pst columns
+  group_by(category) %>%                     # Group by 'category'
+  summarise(across(everything(), ~mean(.x, na.rm = TRUE)))  # Calculate mean using an anonymous function
+
+# View the result
+head(average_pst_by_category)
+
+long_df <- average_pst_by_category %>%
+  pivot_longer(
+    cols = ends_with(".pst"), # Modify this if needed
+    names_to = "population_comparison",
+    values_to = "pst_value"
+  )
+
+# Create the boxplot
+ggplot(long_df, aes(x = category, y = pst_value, fill = category)) +
+  geom_boxplot() +
+  labs(x = "Category", y = "PST Values", title = "Boxplot of PST Values by Category") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Define colors for specific comparisons
+custom_colors <- c(
+  "erythrogaster.vs.gutturalis.pst" = "black",
+  "rustica.eu.vs.gutturalis.pst" = "grey66",
+  "rustica.a.vs.tytleri.pst" = "grey",
+  "gutturalis.vs.rustica.eu.pst" = "brown",
+  "gutturalis.vs.transitiva.pst" = "tan"
+)
+
+# Get unique population comparisons
+unique_comparisons <- unique(long_df$population_comparison)
+
+# Generate rainbow colors for the remaining comparisons
+remaining_comparisons <- setdiff(unique_comparisons, names(custom_colors))
+rainbow_colors <- rainbow(length(remaining_comparisons))
+
+# Combine custom and rainbow colors
+final_colors <- c(custom_colors, setNames(rainbow_colors, remaining_comparisons))
+
+# Create the scatter plot with custom colors
+ggplot(long_df, aes(x = category, y = pst_value, color = population_comparison)) +
+  geom_point(size = 3) +  # Add jitter for better visibility
+  labs(x = "Category", y = "PST Values", title = "PST Values by Category and Population Comparison") +
+  theme_minimal() +
+  #ylim(0,0.4)+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_color_manual(values = final_colors) 
+
+```
+For DXY calculated from pixy
+```{r}
+fst.islands <- cbind(fst.islands[,3:4], dxy.gw[,c(1:3)])
+
+#join FST and PST dfs
+island_mean_df <- island_mean_df %>%
+  separate(Pops, into = c("Pop1", "Pop2"), sep = "\\.vs\\.")
+
+island_mean_df <- island_mean_df %>%
+  rowwise() %>%
+  mutate(pop_key = generate_pop_key(Pop1, Pop2))
+
+merged_df <- merge(fst.islands, island_mean_df, by = "pop_key")
+
+# Create the plot
+a <- ggplot(merged_df, aes(x = avg_dxy, y = Mean)) +
+  geom_point(size = 3) +
+  stat_poly_line() +
+  stat_poly_eq() +
+  geom_smooth(method = "lm", se = T, color = "grey77", fill = "grey100", fill_alpha = 0.9) +
+  labs(title = "Islands",x = "DXY", y = "PST") +
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(), 
+        plot.title = element_text(hjust = 0.5, face = "bold", size = 14),
+        axis.line = element_line(colour = "black"))
+
+cor <- cor(merged_df$Mean, merged_df$avg_dxy, use = "pairwise.complete.obs", method= "spearman")
+cor.test(merged_df$Mean, merged_df$avg_dxy, use = "pairwise.complete.obs", method = "spearman")
+
+```
+
+```{r message=FALSE, warning=FALSE}
+joined_long <- joined.20miss %>%
+  pivot_longer(cols = contains(".vs."), names_to = "Pops", values_to = "Value")
+
+mean_pst <- joined_long %>%
+  group_by(Pops, category) %>%
+  summarize(mean_PST = mean(Value, na.rm = TRUE)) %>%
+  spread(key = category, value = mean_PST)
+
+#remove pst from pops column
+mean_pst$Pops <- gsub("\\.pst", "", mean_pst$Pops)
+
+mean_pst <- mean_pst %>%
+  separate(Pops, into = c("Pop1", "Pop2"), sep = ".vs.") %>%
+  as.data.frame()
+
+mean_pst <- mean_pst %>%
+  rowwise() %>%
+  mutate(pop_key = generate_pop_key(Pop1, Pop2))
+
+# Merge with dxy.gw dataframe
+merged_df <- fst.islands %>%
+  inner_join(mean_pst, by = c("pop_key"))
+
+#pivot_longer
+merged_long <- merged_df %>%
+  pivot_longer(cols = -c(Pop1.x, Pop1.y, Pop2.x, Pop2.y, avg_fst, avg_dxy, pop_key), names_to = "Annotation", values_to = "Mean")
+
+#remove a few NAs
+merged_islands <- merged_long %>% 
+  filter(!Annotation == "<NA>") %>% 
+  filter(!grepl("opensea_", Annotation))%>% 
+  filter(!grepl("shore_", Annotation))%>% 
+  filter(!grepl("shelf_", Annotation))
+
+# Plot
+p1 <- ggplot(merged_islands, aes(x = avg_dxy, y = Mean)) +
+  geom_point(size = 3) +
+  stat_poly_line() +
+  stat_poly_eq() +
+  #geom_text(data = subset(merged_df, corrected_fst > 0.4), aes(label = site.id), vjust = -0.5, hjust = 1) +
+  geom_smooth(method = "lm", se = T, color = "grey77", fill = "grey100", fill_alpha = 0.9) +
+  #scale_color_manual(values = comparison_colors) +
+  labs(x = "DXY", y = "PST") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+  panel.background = element_blank(), axis.line = element_line(colour = "black")) +
+  facet_wrap(~ Annotation, drop = TRUE)
+
+p1
+```
+## For shores:
+```{r}
+pst_columns <- grep("\\.pst$", colnames(shore.20miss), value = TRUE)
+
+# Calculate the average pst values per unique entry in the 'category' column
+average_pst_by_category <- shore.20miss %>%
+  dplyr::select(category, all_of(pst_columns)) %>%  # Select 'category' and pst columns
+  group_by(category) %>%                     # Group by 'category'
+  summarise(across(everything(), ~mean(.x, na.rm = TRUE)))  # Calculate mean using an anonymous function
+
+# View the result
+head(average_pst_by_category)
+
+long_df <- average_pst_by_category %>%
+  pivot_longer(
+    cols = ends_with(".pst"), # Modify this if needed
+    names_to = "population_comparison",
+    values_to = "pst_value"
+  )
+
+# Create the boxplot
+ggplot(long_df, aes(x = category, y = pst_value, fill = category)) +
+  geom_boxplot() +
+  labs(x = "Category", y = "PST Values", title = "Boxplot of PST Values by Category") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Define colors for specific comparisons
+custom_colors <- c(
+  "erythrogaster.vs.gutturalis.pst" = "black",
+  "rustica.eu.vs.gutturalis.pst" = "grey66",
+  "rustica.a.vs.tytleri.pst" = "grey",
+  "gutturalis.vs.rustica.eu.pst" = "brown",
+  "gutturalis.vs.transitiva.pst" = "tan"
+)
+
+# Get unique population comparisons
+unique_comparisons <- unique(long_df$population_comparison)
+
+# Generate rainbow colors for the remaining comparisons
+remaining_comparisons <- setdiff(unique_comparisons, names(custom_colors))
+rainbow_colors <- rainbow(length(remaining_comparisons))
+
+# Combine custom and rainbow colors
+final_colors <- c(custom_colors, setNames(rainbow_colors, remaining_comparisons))
+
+# Create the scatter plot with custom colors
+ggplot(long_df, aes(x = category, y = pst_value, color = population_comparison)) +
+  geom_point(size = 3) +  # Add jitter for better visibility
+  labs(x = "Category", y = "PST Values", title = "PST Values by Category and Population Comparison") +
+  theme_minimal() +
+  #ylim(0,0.4)+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_color_manual(values = final_colors) 
+
+```
+For DXY calculated from pixy
+```{r}
+fst.shore <- cbind(fst.shore[,3:4], dxy.gw[,c(1:3)])
+
+#join FST and PST dfs
+shore_mean_df <- shore_mean_df %>%
+  separate(Pops, into = c("Pop1", "Pop2"), sep = "\\.vs\\.")
+
+shore_mean_df <- shore_mean_df %>%
+  rowwise() %>%
+  mutate(pop_key = generate_pop_key(Pop1, Pop2))
+
+merged_df <- merge(fst.shore, shore_mean_df, by = "pop_key")
+
+# Create the plot
+b <- ggplot(merged_df, aes(x = avg_dxy, y = Mean)) +
+  geom_point(size = 3) +
+  stat_poly_line() +
+  stat_poly_eq() +
+  geom_smooth(method = "lm", se = T, color = "grey77", fill = "grey100", fill_alpha = 0.9) +
+  labs(title = "Flanks",x = "DXY", y = "PST") +
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(), 
+        plot.title = element_text(hjust = 0.5, face = "bold", size = 14),
+        axis.line = element_line(colour = "black"))
+
+
+cor <- cor(merged_df$Mean, merged_df$avg_dxy, use = "pairwise.complete.obs", method= "spearman")
+cor.test(merged_df$Mean, merged_df$avg_dxy, use = "pairwise.complete.obs", method = "spearman")
+```
+
+```{r message=FALSE, warning=FALSE}
+joined_long <- joined.20miss %>%
+  pivot_longer(cols = contains(".vs."), names_to = "Pops", values_to = "Value")
+
+mean_pst <- joined_long %>%
+  group_by(Pops, category) %>%
+  summarize(mean_PST = mean(Value, na.rm = TRUE)) %>%
+  spread(key = category, value = mean_PST)
+
+#remove pst from pops column
+mean_pst$Pops <- gsub("\\.pst", "", mean_pst$Pops)
+
+mean_pst <- mean_pst %>%
+  separate(Pops, into = c("Pop1", "Pop2"), sep = ".vs.") %>%
+  as.data.frame()
+
+mean_pst <- mean_pst %>%
+  rowwise() %>%
+  mutate(pop_key = generate_pop_key(Pop1, Pop2))
+
+# Merge with dxy.gw dataframe
+merged_df <- fst.shore %>%
+  inner_join(mean_pst, by = c("pop_key"))
+
+#pivot_longer
+merged_long <- merged_df %>%
+  pivot_longer(cols = -c(Pop1.x, Pop1.y, Pop2.x, Pop2.y, avg_fst, avg_dxy, pop_key), names_to = "Annotation", values_to = "Mean")
+
+#remove a few NAs
+merged_shore <- merged_long %>% 
+  filter(!Annotation == "<NA>") %>% 
+  filter(!grepl("island_", Annotation))%>% 
+  filter(!grepl("opensea_", Annotation))%>% 
+  filter(!grepl("shelf_", Annotation))
+
+# Plot
+p1 <- ggplot(merged_shore, aes(x = avg_dxy, y = Mean)) +
+  geom_point(size = 3) +
+  stat_poly_line() +
+  stat_poly_eq() +
+  #geom_text(data = subset(merged_df, corrected_fst > 0.4), aes(label = site.id), vjust = -0.5, hjust = 1) +
+  geom_smooth(method = "lm", se = T, color = "grey77", fill = "grey100", fill_alpha = 0.9) +
+  #scale_color_manual(values = comparison_colors) +
+  labs(x = "DXY", y = "PST") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+  panel.background = element_blank(), axis.line = element_line(colour = "black")) +
+  facet_wrap(~ Annotation, drop = TRUE)
+
+p1
+```
+
+
+## For opensea:
+
+```{r}
+pst_columns <- grep("\\.pst$", colnames(opensea.20miss), value = TRUE)
+
+# Calculate the average pst values per unique entry in the 'category' column
+average_pst_by_category <- opensea.20miss %>%
+  dplyr::select(category, all_of(pst_columns)) %>%  # Select 'category' and pst columns
+  group_by(category) %>%                     # Group by 'category'
+  summarise(across(everything(), ~mean(.x, na.rm = TRUE)))  # Calculate mean using an anonymous function
+
+# View the result
+head(average_pst_by_category)
+
+long_df <- average_pst_by_category %>%
+  pivot_longer(
+    cols = ends_with(".pst"), # Modify this if needed
+    names_to = "population_comparison",
+    values_to = "pst_value"
+  )
+
+# Create the boxplot
+ggplot(long_df, aes(x = category, y = pst_value, fill = category)) +
+  geom_boxplot() +
+  labs(x = "Category", y = "PST Values", title = "Boxplot of PST Values by Category") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Define colors for specific comparisons
+custom_colors <- c(
+  "erythrogaster.vs.gutturalis.pst" = "black",
+  "rustica.eu.vs.gutturalis.pst" = "grey66",
+  "rustica.a.vs.tytleri.pst" = "grey",
+  "gutturalis.vs.rustica.eu.pst" = "brown",
+  "gutturalis.vs.transitiva.pst" = "tan"
+)
+
+# Get unique population comparisons
+unique_comparisons <- unique(long_df$population_comparison)
+
+# Generate rainbow colors for the remaining comparisons
+remaining_comparisons <- setdiff(unique_comparisons, names(custom_colors))
+rainbow_colors <- rainbow(length(remaining_comparisons))
+
+# Combine custom and rainbow colors
+final_colors <- c(custom_colors, setNames(rainbow_colors, remaining_comparisons))
+
+# Create the scatter plot with custom colors
+ggplot(long_df, aes(x = category, y = pst_value, color = population_comparison)) +
+  geom_point(size = 3) +  # Add jitter for better visibility
+  labs(x = "Category", y = "PST Values", title = "PST Values by Category and Population Comparison") +
+  theme_minimal() +
+  #ylim(0,0.4)+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_color_manual(values = final_colors) 
+
+```
+
+For DXY calculated from pixy
+```{r}
+fst.opensea <- cbind(fst.opensea[,3:4], dxy.gw[,c(1:3)])
+
+#join FST and PST dfs
+opensea_mean_df <- opensea_mean_df %>%
+  separate(Pops, into = c("Pop1", "Pop2"), sep = "\\.vs\\.")
+
+opensea_mean_df <- opensea_mean_df %>%
+  rowwise() %>%
+  mutate(pop_key = generate_pop_key(Pop1, Pop2))
+
+opensea_df <- merge(fst.opensea, opensea_mean_df, by = "pop_key")
+
+# Create the plot
+c <- ggplot(opensea_df, aes(x = avg_dxy, y = Mean)) +
+  geom_point(size = 3) +
+  stat_poly_line() +
+  stat_poly_eq() +
+  geom_smooth(method = "lm", se = T, color = "grey77", fill = "grey100", fill_alpha = 0.9) +
+  labs(title = "Sites",x = "DXY", y = "PST") +
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(), 
+        plot.title = element_text(hjust = 0.5, face = "bold", size = 14),
+        axis.line = element_line(colour = "black"))
+
+cor <- cor(opensea_df$Mean, opensea_df$avg_dxy, use = "pairwise.complete.obs", method= "spearman")
+cor.test(opensea_df$Mean, opensea_df$avg_dxy, use = "pairwise.complete.obs", method = "spearman")
+
+```
+
+```{r message=FALSE, warning=FALSE}
+joined_long <- joined.20miss %>%
+  pivot_longer(cols = contains(".vs."), names_to = "Pops", values_to = "Value")
+
+mean_pst <- joined_long %>%
+  group_by(Pops, category) %>%
+  summarize(mean_PST = mean(Value, na.rm = TRUE)) %>%
+  spread(key = category, value = mean_PST)
+
+#remove pst from pops column
+mean_pst$Pops <- gsub("\\.pst", "", mean_pst$Pops)
+
+mean_pst <- mean_pst %>%
+  separate(Pops, into = c("Pop1", "Pop2"), sep = ".vs.") %>%
+  as.data.frame()
+
+mean_pst <- mean_pst %>%
+  rowwise() %>%
+  mutate(pop_key = generate_pop_key(Pop1, Pop2))
+
+# Merge with dxy.gw dataframe
+merged_df <- fst.opensea %>%
+  inner_join(mean_pst, by = c("pop_key"))
+
+#pivot_longer
+merged_long <- merged_df %>%
+  pivot_longer(cols = -c(Pop1.x, Pop1.y, Pop2.x, Pop2.y, avg_fst, avg_dxy, pop_key), names_to = "Annotation", values_to = "Mean")
+
+#remove a few NAs
+merged_opensea <- merged_long %>% 
+  filter(!Annotation == "<NA>") %>% 
+  filter(!grepl("island_", Annotation))%>% 
+  filter(!grepl("shore_", Annotation))%>% 
+  filter(!grepl("shelf_", Annotation))
+
+# Plot
+p3 <- ggplot(merged_opensea, aes(x = avg_dxy, y = Mean)) +
+  geom_point(size = 3) +
+  stat_poly_line() +
+  stat_poly_eq() +
+  #geom_text(data = subset(merged_df, corrected_fst > 0.4), aes(label = site.id), vjust = -0.5, hjust = 1) +
+  geom_smooth(method = "lm", se = T, color = "grey77", fill = "grey100", fill_alpha = 0.9) +
+  #scale_color_manual(values = comparison_colors) +
+  labs(x = "DXY", y = "PST") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+  panel.background = element_blank(), axis.line = element_line(colour = "black")) +
+  facet_wrap(~ Annotation, drop = TRUE)
+
+p3
+```
+
+```{r}
+# Arrange the three plots in 1 row and 3 columns
+grid.arrange(a, b, c, ncol = 3)
+
+```
+save results
+```{r}
+ggsave("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST_FST_gw/SuppFig_PST_DXY_regional.png", arrangeGrob(a, b, c, ncol = 3), width = 12, height = 4, units = "in", dpi = 500)
+
+
+all_regions_pst <- rbind(merged_islands, merged_shore, merged_opensea)
+
+write.table(all_regions_pst, "/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST_FST_gw/1_rho_dxy_per_category_results.txt", quote=F, row.names=F)
+```
+
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

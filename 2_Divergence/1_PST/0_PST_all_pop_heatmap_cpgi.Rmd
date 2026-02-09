@@ -1,0 +1,379 @@
+---
+title: "PST Results: Whole genome comparison"
+author: "Sarah Mueller"
+date: "2025 - final"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+### Libraries
+.libPaths(c(.libPaths(),"/dss/dsshome1/lxc0B/ra52qed/R/x86_64-pc-linux-gnu-library/4.2"))
+
+library(vegan)
+library(ggplot2)
+library(plyr)
+library(broom)
+library(readxl)
+library(cluster)
+library(ape)
+library(languageR)
+library(ggrepel)
+library(knitr)
+library(ggvenn)
+library(gridExtra)
+library(tidyr)
+library(dplyr)
+library(purrr)
+
+setwd("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST_FST_gw/")
+
+```
+
+## PST Results
+
+I want to look at PST across populations at the genome-wide level
+```{r message=FALSE, warning=FALSE}
+#######Data Preparation#####
+#load in just one population comparison first
+pst.allsite <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/0_cpgi_pst/0_pst_cpgi_c05.txt", header=T)
+
+#sample names
+sample_names <- read.table("/dss/dsshome1/lxc0B/ra52qed/gitlab/swallow.projects/scripts/0_sample.lists/sample.names.85.txt")
+#add sample pops
+sample_names <- sample_names %>%
+  mutate(pop = case_when(
+    grepl("RU_13_R_", V1) ~ "RUr",
+    grepl("CH_", V1) ~ "RUe",
+    grepl("DE_", V1) ~ "RUe",
+    grepl("FI", V1) ~ "RUe",
+    grepl("_G_", V1) ~ "GU",
+    grepl("_E_", V1) ~ "ER",
+    grepl("_S_", V1) ~ "SA",
+    grepl("_TV_", V1) ~ "TR",
+    grepl("_T_", V1) ~ "TY"))
+
+##Create a list of comparisons
+pop.list <- as.data.frame(unique(as.vector(sample_names$pop)))
+colnames(pop.list) <- c("pop1")
+pop.combo <- tidyr::crossing(var1=pop.list$pop1, var2=pop.list$pop1)
+pop.combo <- pop.combo[c(2:7, 10:14, 18:21,26:28, 34:35,42),]
+
+#get explanatory variables set
+info <- read_xlsx("/dss/dsshome1/lxc0B/ra52qed/gitlab/swallow.projects/scripts/0_sample.lists/NCBI_info_updated_20220727.xlsx")
+
+#remove all individuals not used for this analysis
+info=info %>%
+  dplyr::slice(match(sample_names$V1, info$sample_name))
+
+```
+Separate into cpgi and shores and opensea
+
+```{r}
+prop.homer.20miss <- read.delim("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_Pre-processing/4_methyl_calling/1_CpG_islands/168.20miss/homer.cpgi.prop.168.merged.20miss.rmlowv.rmout.txt", header=T)
+
+pst.allsite <- left_join(pst.allsite, prop.homer.20miss, by = c("site.id" = "region.id"))
+
+cpgi_pst <- pst.allsite %>% 
+          filter(grepl("^island_", category)) %>%
+          dplyr::select("site.id", contains(".vs."))
+
+shore_pst <- pst.allsite %>% 
+          filter(grepl("^shore_", category)) %>%
+          dplyr::select("site.id", contains(".vs."))
+
+opensea_pst <- pst.allsite %>% 
+          filter(grepl("^opensea_", category)) %>%
+          dplyr::select("site.id", contains(".vs."))
+```
+
+##For CpGislands, flanks and non-Cpg island sites together 
+I want to summarize across all loci and calculate one cpgi-wide metric
+
+```{r message=FALSE, warning=FALSE}
+#get mean PST across all sites for each comparison
+pst.all <- pst.allsite %>%
+    dplyr::summarize(
+      across(2:22, mean, na.rm = TRUE),
+      site_id = min(site.id, order_by = site.id),
+      site_count = n()  # Count number of sites in each group
+    )
+
+pst.all <- cbind(pop.combo, t(pst.all[1:21]))
+colnames(pst.all) <- c("pop1", "pop2", "pst")
+
+pst.all$pst <- as.numeric(pst.all$pst)
+
+pst.copy <- pst.all %>% 
+  transmute(pop1 = pst.all$pop2, pop2 = pst.all$pop1, pst = pst.all$pst)
+# Combine the two dataframes using bind_rows
+pst.all <- bind_rows(pst.all, pst.copy)
+
+# Define the desired population order
+pop_levels <- c("SA", "TR", "RUe", "RUr", "GU", "TY", "ER")
+
+# Apply factor levels to both pop1 and pop2
+pst.all <- pst.all %>%
+  mutate(
+    pop1 = factor(pop1, levels = pop_levels),
+    pop2 = factor(pop2, levels = pop_levels)
+  )
+
+# Plot PST values with the fixed order
+all_pst <- ggplot(pst.all, aes(x = pop1, y = pop2, fill = pst)) + 
+  geom_tile(
+    data = subset(pst.all, as.integer(pop1) < as.integer(pop2)), 
+    aes(fill = pst),
+    color = "black", size = 0.2   # thin black borders
+  ) +
+  geom_text(
+    data = subset(pst.all, as.integer(pop1) < as.integer(pop2)), 
+    aes(label = sprintf("%0.3f", round(pst, digits = 3)))
+  ) +
+  coord_fixed() +
+  scale_fill_gradient2(
+    low = "#8EC3E6", mid= "#e6f3f8", high = "red",
+    midpoint = c(0.03),
+    limits = c(0.024, 0.045),                   # force scale to 0–0.03
+    breaks = c(0.03, 0.04),            # only 3 breaks
+    labels = scales::number_format(accuracy = 0.01)  # 2 decimal places
+  ) +
+  theme(
+    axis.text.x = element_text(size = 10), 
+    axis.text.y = element_text(size = 10), 
+    axis.title = element_blank(), 
+    legend.title = element_text(size=15),
+    legend.position = c(0.95, 0.1),   # bottom-right corner inside
+    legend.justification = c("right", "bottom"),
+    legend.background = element_rect(fill = "white", color = "white"),
+    legend.key.size = unit(0.6, "cm"),
+    panel.background = element_rect(fill = "white"),
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank()
+  ) +
+  labs(fill = expression(P[ST]))
+
+all_pst
+```
+
+##For CpGislands 
+I want to summarize across all loci and calculate one cpgi-wide metric
+
+```{r message=FALSE, warning=FALSE}
+#get mean PST across all sites for each comparison
+pst.cpgi <- cpgi_pst %>%
+    dplyr::summarize(
+      across(2:22, mean, na.rm = TRUE),
+      site_id = min(site.id, order_by = site.id),
+      site_count = n()  # Count number of sites in each group
+    )
+
+pst.cpgi <- cbind(pop.combo, t(pst.cpgi[1:21]))
+colnames(pst.cpgi) <- c("pop1", "pop2", "pst")
+
+pst.cpgi$pst <- as.numeric(pst.cpgi$pst)
+
+pst.copy <- pst.cpgi %>% 
+  transmute(pop1 = pst.cpgi$pop2, pop2 = pst.cpgi$pop1, pst = pst.cpgi$pst)
+# Combine the two dataframes using bind_rows
+pst.cpgi <- bind_rows(pst.cpgi, pst.copy)
+
+# Define the desired population order
+pop_levels <- c("SA", "TR", "RUe", "RUr", "GU", "TY", "ER")
+
+# Apply factor levels to both pop1 and pop2
+pst.cpgi <- pst.cpgi %>%
+  mutate(
+    pop1 = factor(pop1, levels = pop_levels),
+    pop2 = factor(pop2, levels = pop_levels)
+  )
+
+# Plot PST values with the fixed order
+cpgi_pst <- ggplot(pst.cpgi, aes(x = pop1, y = pop2, fill = pst)) + 
+  geom_tile(
+    data = subset(pst.cpgi, as.integer(pop1) < as.integer(pop2)), 
+    aes(fill = pst),
+    color = "black", size = 0.2   # thin black borders
+  ) +
+  geom_text(
+    data = subset(pst.cpgi, as.integer(pop1) < as.integer(pop2)), 
+    aes(label = sprintf("%0.3f", round(pst, digits = 3)))
+  ) +
+  coord_fixed() +
+  scale_fill_gradient2(
+    low = "#8EC3E6", mid= "#e6f3f8", high = "red",
+    midpoint = c(0.03),
+    limits = c(0.024, 0.055),                   # force scale to 0–0.03
+    breaks = c(0.03, 0.04, 0.05),            # only 3 breaks
+    labels = scales::number_format(accuracy = 0.01)  # 2 decimal places
+  ) +
+  theme(
+    axis.text.x = element_text(size = 10), 
+    axis.text.y = element_text(size = 10), 
+    axis.title = element_blank(), 
+    legend.title = element_text(size=15),
+    legend.position = c(0.95, 0.1),   # bottom-right corner inside
+    legend.justification = c("right", "bottom"),
+    legend.background = element_rect(fill = "white", color = "white"),
+    legend.key.size = unit(0.6, "cm"),
+    panel.background = element_rect(fill = "white"),
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank()
+  ) +
+  labs(fill = expression(P[ST]))
+
+cpgi_pst
+```
+
+##For Flanking regions 
+I want to summarize across all loci and calculate one shore wide
+
+```{r message=FALSE, warning=FALSE}
+#get mean PST across all sites for each comparison
+pst.shore <- shore_pst %>%
+    dplyr::summarize(
+      across(2:22, mean, na.rm = TRUE),
+      site_id = min(site.id, order_by = site.id),
+      site_count = n()  # Count number of sites in each group
+    )
+
+pst.shore <- cbind(pop.combo, t(pst.shore[1:21]))
+colnames(pst.shore) <- c("pop1", "pop2", "pst")
+
+pst.shore$pst <- as.numeric(pst.shore$pst)
+
+pst.copy <- pst.shore %>% 
+  transmute(pop1 = pst.shore$pop2, pop2 = pst.shore$pop1, pst = pst.shore$pst)
+# Combine the two dataframes using bind_rows
+pst.shore <- bind_rows(pst.shore, pst.copy)
+
+# Define the desired population order
+pop_levels <- c("SA", "TR", "RUe", "RUr", "GU", "TY", "ER")
+
+# Apply factor levels to both pop1 and pop2
+pst.shore <- pst.shore %>%
+  mutate(
+    pop1 = factor(pop1, levels = pop_levels),
+    pop2 = factor(pop2, levels = pop_levels)
+  )
+
+# Plot PST values with the fixed order
+shore_pst <- ggplot(pst.shore, aes(x = pop1, y = pop2, fill = pst)) + 
+  geom_tile(
+    data = subset(pst.shore, as.integer(pop1) < as.integer(pop2)), 
+    aes(fill = pst),
+    color = "black", size = 0.2   # thin black borders
+  ) +
+  geom_text(
+    data = subset(pst.shore, as.integer(pop1) < as.integer(pop2)), 
+    aes(label = sprintf("%0.3f", round(pst, digits = 3)))
+  ) +
+  coord_fixed() +
+  scale_fill_gradient2(
+    low = "#8EC3E6", mid= "#e6f3f8", high = "red",
+    midpoint = c(0.03),
+    limits = c(0.024, 0.05),                   # force scale to 0–0.03
+    breaks = c(0.03, 0.04, 0.05),            # only 3 breaks
+    labels = scales::number_format(accuracy = 0.01)  # 2 decimal places
+  ) +
+  theme(
+    axis.text.x = element_text(size = 10), 
+    axis.text.y = element_text(size = 10), 
+    axis.title = element_blank(), 
+    legend.title = element_text(size=15),
+    legend.position = c(0.95, 0.1),   # bottom-right corner inside
+    legend.justification = c("right", "bottom"),
+    legend.background = element_rect(fill = "white", color = "white"),
+    legend.key.size = unit(0.6, "cm"),
+    panel.background = element_rect(fill = "white"),
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank()
+  ) +
+  labs(fill = expression(P[ST]))
+
+shore_pst
+
+```
+
+##For all sites outside of CpGi and flanking regions
+I want to summarize across all loci and calculate one metric
+
+```{r message=FALSE, warning=FALSE}
+#get mean PST across all sites for each comparison
+pst.open <- opensea_pst %>%
+    dplyr::summarize(
+      across(2:22, mean, na.rm = TRUE),
+      site_id = min(site.id, order_by = site.id),
+      site_count = n()  # Count number of sites in each group
+    )
+
+pst.open <- cbind(pop.combo, t(pst.open[1:21]))
+colnames(pst.open) <- c("pop1", "pop2", "pst")
+
+pst.open$pst <- as.numeric(pst.open$pst)
+
+pst.copy.o <- pst.open %>% 
+  transmute(pop1 = pst.open$pop2, pop2 = pst.open$pop1, pst = pst.open$pst)
+# Combine the two dataframes using bind_rows
+pst.open <- bind_rows(pst.open, pst.copy.o)
+
+# Define the desired population order
+pop_levels <- c("SA", "TR", "RUe", "RUr", "GU", "TY", "ER")
+
+# Apply factor levels to both pop1 and pop2
+pst.open <- pst.open %>%
+  mutate(
+    pop1 = factor(pop1, levels = pop_levels),
+    pop2 = factor(pop2, levels = pop_levels)
+  )
+
+# Plot PST values with the fixed order
+open_pst <- ggplot(pst.open, aes(x = pop1, y = pop2, fill = pst)) + 
+  geom_tile(
+    data = subset(pst.open, as.integer(pop1) < as.integer(pop2)), 
+    aes(fill = pst),
+    color = "black", size = 0.2   # thin black borders
+  ) +
+  geom_text(
+    data = subset(pst.open, as.integer(pop1) < as.integer(pop2)), 
+    aes(label = sprintf("%0.3f", round(pst, digits = 3)))
+  ) +
+  coord_fixed() +
+  scale_fill_gradient2(
+    low = "#8EC3E6", mid= "#e6f3f8", high = "red",
+    midpoint = 0.03,
+    limits = c(0.025, 0.042),
+    breaks = c(0.03, 0.04),
+    labels = scales::number_format(accuracy = 0.01)
+  ) +
+  theme(
+    axis.text.x = element_text(size = 10), 
+    axis.text.y = element_text(size = 10), 
+    axis.title = element_blank(), 
+    legend.title = element_text(size=15),
+    legend.position = c(0.95, 0.1),   # bottom-right corner inside
+    legend.justification = c("right", "bottom"),
+    legend.background = element_rect(fill = "white", color = "white"),
+    legend.key.size = unit(0.6, "cm"),
+    panel.background = element_rect(fill = "white"),
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank()
+  ) +
+  labs(fill = expression(P[ST]))
+
+
+open_pst
+
+
+```
+
+Save images
+```{r}
+ggsave("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/1_Figure1d_PST_heatmap.png", plot = all_pst, width = 5, height = 4, units = "in", dpi = 500)
+
+ggsave("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/1_SuppFig_PST_cpgi_heatmap.png", plot = cpgi_pst, width = 5, height = 4, units = "in", dpi = 500)
+
+ggsave("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/1_SuppFig_PST_shore_heatmap.png", plot = shore_pst, width = 5, height = 4, units = "in", dpi = 500)
+
+ggsave("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/1_SuppFig_PST_opensea_heatmap.png", plot = open_pst, width = 5, height = 4, units = "in", dpi = 500)
+```

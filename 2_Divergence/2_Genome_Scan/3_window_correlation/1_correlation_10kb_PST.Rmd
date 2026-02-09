@@ -1,0 +1,1434 @@
+---
+title: "Correlations- PST/FST - 10kb windows"
+author: "Sarah Mueller"
+date: "2024-02-12"
+output: html_document
+---
+
+```{r setup}
+knitr::opts_chunk$set(echo = TRUE)
+### Libraries
+.libPaths(c(.libPaths(),"/dss/dsshome1/lxc0B/ra52qed/R/x86_64-pc-linux-gnu-library/4.2"))
+
+library(vegan)
+library(plyr)
+library(broom)
+library(readxl)
+library(cluster)
+library(ape)
+library(languageR)
+library(packfor)
+library(ggrepel)
+library(knitr)
+library(ggvenn)
+#library(ggbreak)
+library(tidyr)
+#library(ggpubr)
+library(dplyr)
+library(purrr)
+library(ggpmisc)
+library(gridExtra)
+library(stringr)
+library(ggplot2, lib = "/dss/dsshome1/lxc0B/ra52qed/R/x86_64-pc-linux-gnu-library/4.2")
+
+```
+
+##PST vs. FST comparison
+
+I want to look at PST and FST correlation across 10kb windows between islands, flanks and sites. 
+
+First these files need to be created and PST needs to be calculated for each region at 10kb.
+
+```{r message=FALSE, warning=FALSE}
+# Load in PST values per regional windows
+file_paths <- list(
+  cpgi = "/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/0_window_pst/0_pst_cpgi_10kb_c05.txt",
+  cpgi_promoter = "/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/0_window_pst/0_pst_cpgi_promoter_10kb_c05.txt",
+  cpgi_intron = "/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/0_window_pst/0_pst_cpgi_intron_10kb_c05.txt",
+  cpgi_intergenic = "/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/0_window_pst/0_pst_cpgi_intergenic_10kb_c05.txt",
+  cpgi_exon = "/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/0_window_pst/0_pst_cpgi_exon_10kb_c05.txt",
+  cpgi_TTS = "/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/0_window_pst/0_pst_cpgi_TTS_10kb_c05.txt",
+  opensea = "/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/0_window_pst/0_pst_opensea_10kb_c05.txt",
+  opensea_promoter = "/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/0_window_pst/0_pst_opensea_promoter_10kb_c05.txt",
+  opensea_intron = "/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/0_window_pst/0_pst_opensea_intron_10kb_c05.txt",
+  opensea_intergenic = "/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/0_window_pst/0_pst_opensea_intergenic_10kb_c05.txt",
+  opensea_exon = "/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/0_window_pst/0_pst_opensea_exon_10kb_c05.txt",
+  opensea_TTS = "/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/0_window_pst/0_pst_opensea_TTS_10kb_c05.txt",
+  shore = "/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/0_window_pst/0_pst_shore_10kb_c05.txt",
+  shore_promoter = "/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/0_window_pst/0_pst_shore_promoter_10kb_c05.txt",
+  shore_intron = "/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/0_window_pst/0_pst_shore_intron_10kb_c05.txt",
+  shore_intergenic = "/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/0_window_pst/0_pst_shore_intergenic_10kb_c05.txt",
+  shore_exon = "/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/0_window_pst/0_pst_shore_exon_10kb_c05.txt",
+  shore_TTS = "/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/0_window_pst/0_pst_shore_TTS_10kb_c05.txt"
+)
+
+# Create an empty list to store the processed dataframes
+pst_window <- list()
+
+# Loop through the files, read, and process each one
+for (name in names(file_paths)) {
+  df <- read.delim(file_paths[[name]], header = TRUE, sep = "") %>%
+    separate(site.id, into = c("chr", "pos"), sep = "\\.") %>%
+    mutate(pos = as.numeric(pos)) %>%
+    filter(!(chr == "chr04" & pos >= 37234403 & pos <= 73257096)) %>%
+    filter(!(chr == "chr15"))
+
+  # Storread.delim()# Store the processed dataframe in the list with its original name
+  pst_window[[name]] <- df
+}
+
+
+```
+
+Now add FST info per windows
+
+```{r}
+#load FST
+fst.fd <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/5_WGS/1_Population_Structure/4_pixy/HR.168.invariant.10kb/HR.168.invariant.10kb_fst.txt", header=T)
+colnames(fst.fd) <- c("pop1", "pop2", "chr", "window_start", "window_end", "fst", "nsites")
+
+#pivot_shorter to match pst data
+fst.pw <- fst.fd %>%
+  mutate(comparison = paste(pop1, pop2, "fst", sep = ".vs.")) %>%  # Create a unique comparison column
+  dplyr::select(chr, window_start, window_end, comparison, fst) %>%  # Select relevant columns
+  pivot_wider(
+    names_from = comparison,  # Create new columns from the comparison column
+    values_from = fst  # Fill values from avg_wc_fst
+  )
+
+fst.pw <- fst.pw %>%
+  dplyr::rename("erythrogaster.vs.gutturalis.vs.fst" = "gutturalis.vs.erythrogaster.vs.fst") %>%
+   dplyr::rename("erythrogaster.vs.rustica.eu.vs.fst" = "rustica.eu.vs.erythrogaster.vs.fst") %>%
+   dplyr::rename("gutturalis.vs.rustica.eu.vs.fst" = "rustica.eu.vs.gutturalis.vs.fst") %>%
+   dplyr::rename("rustica.r.vs.savignii.vs.fst" = "savignii.vs.rustica.r.vs.fst") %>%
+   dplyr::rename("rustica.r.vs.transitiva.vs.fst" = "transitiva.vs.rustica.r.vs.fst")
+```
+
+Load chromosme information
+
+```{r}
+#add genome information
+hr.genome <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_genome_files/0_rename_chr/chromosomes.genome")
+colnames(hr.genome) <- c("chr", "max_bp")
+hr.genome <- hr.genome %>%
+  filter(!grepl("_random|W|Z", chr))
+#update chr04, as no snps past certain value
+hr.genome <- hr.genome %>%
+  mutate(max_bp = if_else(chr == "chr04", 37234403, max_bp))%>%
+  mutate(max_bp = if_else(chr == "chr15", 0, max_bp))
+
+```
+
+Loop through PST dataframes and create a list containing the different population comparisons for each dataframe.
+
+So now the structure is list of cpgi_exon: 21 lists of each population within this
+
+```{r}
+#Start a list that will hold a nested list: outer lists = regional windows, (i.e. cpgi_promoters, introns, etc.), nested list = population comparisons with PST information
+pst_window_pop_list <- list()
+
+# Loop through each dataframe name in the pst_window list
+for (df_name in names(pst_window)) {
+  # Get the current dataframe from the list
+  current_df <- pst_window[[df_name]]
+
+  # Get the list of all `.pst` columns
+  pst_columns <- grep("\\.pst$", names(current_df), value = TRUE)
+
+  # Initialize an empty list to store the resulting dataframes for the current main dataframe
+  current_list <- list()
+
+  # Loop through each `.pst` column
+  for (pst_col in pst_columns) {
+    # Create a new dataframe with chr, pos, and the current pst column
+    df_pst <- current_df %>%
+      dplyr::select(chr, pos, all_of(pst_col))
+
+    # Store the result in the list with the name of the pst column
+    current_list[[pst_col]] <- df_pst
+  }
+
+  original_names <- names(current_list)
+
+  current_list <- lapply(names(current_list), function(name) {
+    current_list[[name]] %>%
+      mutate(pops = name) %>%
+      mutate(pops = str_remove(pops, "\\.pst$")) %>% # Ensure only the trailing .pst is removed
+      # Split the 'pops' column into 'pop1' and 'pop2' by '.vs.'
+      separate(pops, into = c("pop1", "pop2"), sep = "\\.vs\\.") %>%
+      # Optionally, ensure that 'pop1' and 'pop2' are factors or characters, if needed
+      mutate(across(c(pop1, pop2), as.character)) # You can adjust this as needed
+  })
+
+  # Ensure the names are preserved
+  names(current_list) <- original_names
+
+  # Loop through the list and add bp_cum for plotting
+  for (name in names(current_list)) {
+    # Get the dataframe
+    df <- current_list[[name]]
+
+    # Rename the pst column for plotting
+    pst_col_names <- grep("\\.pst$", names(df), value = TRUE)
+    if (length(pst_col_names) > 0) {
+      new_col_name <- paste0(str_remove(df_name, "^(pst\\.|opensea\\.)"), ".pst")
+      df <- df %>% dplyr::rename(!!new_col_name := all_of(pst_col_names))
+    }
+    
+    # Step 1: Calculate cumulative bp_add from the hr.genome track
+    data_cum <- hr.genome %>%
+      group_by(chr) %>%
+      dplyr::summarize(max_bp = max(max_bp)) %>%
+      mutate(bp_add = lag(cumsum(max_bp), default = 0))
+
+    # Convert bp_add to numeric
+    data_cum$bp_add <- as.numeric(data_cum$bp_add)
+
+    # Step 2: Join with the original dataframe and calculate bp_cum
+    df <- df %>%
+      inner_join(data_cum, by = "chr") %>%
+      mutate(window_center = as.numeric(pos + 5000),
+             bp_cum = window_center + bp_add)
+
+    # Step 3: Save the updated dataframe back into the list
+    current_list[[name]] <- df
+  }
+
+  # Store the processed list for the current main dataframe
+  pst_window_pop_list[[df_name]] <- current_list
+}
+
+```
+
+## Load FST data 
+
+Put the FST into the proper format for plotting, by adding the total bp for each chromosome and reducing some data points
+```{r}
+fst_columns <- grep("\\.fst$", names(fst.pw), value = TRUE)
+
+# Initialize an empty list to store the resulting dataframes
+fst_list <- list()
+fst_points_list <- list()
+
+
+# Loop through each `.fst` column
+for (fst_col in fst_columns) {
+  # Create a new dataframe with chr, pos, and the current pst column
+  df_fst <- fst.pw %>%
+    dplyr::select(chr, window_start, window_end, !!fst_col) %>%
+    dplyr::rename(fst = !!sym(fst_col))
+  
+  # Add the bp_max, bp_add for plotting
+  df_fst_windows <- df_fst %>%
+    inner_join(data_cum, by = "chr") %>%
+    mutate(window_end = as.numeric(window_end),
+           bp_cum = window_end + bp_add) %>%
+    filter(!is.na(fst)) %>% 
+    filter(!fst < 0) %>% 
+    dplyr::select(-bp_add, -max_bp)
+  
+  # Set axis for plotting using df_fst_windows (not fst.gc)
+  axis_set <- df_fst_windows %>%
+    group_by(chr) %>%
+    dplyr::summarize(center = mean(bp_cum))  # Use df_fst_windows here
+  
+  # Reduce data points for plotting by choosing one fst for a larger region
+  fst_window <- df_fst_windows %>%
+    group_by(chr) %>%                              # Group by chromosome
+    arrange(chr, bp_cum) %>%                       # Sort data for smooth line connections
+    ungroup()
+
+  fst_points <- df_fst_windows 
+
+  # Store the result in the list with the name of the pst column
+  fst_list[[fst_col]] <- fst_window
+  fst_points_list[[fst_col]] <- fst_points
+  
+}
+
+original_names <- names(fst_list)
+
+fst_list <- lapply(names(fst_list), function(name) {
+  # Add the pops column and modify the dataframe
+  df <- fst_list[[name]] %>%
+    mutate(pops = name) %>%
+    mutate(pops = str_remove(pops, "\\.vs\\.fst")) %>%
+    # Split the 'pops' column into 'pop1' and 'pop2' by '.vs.'
+    separate(pops, into = c("pop1", "pop2"), sep = "\\.vs\\.") %>%
+    # Optionally, ensure that 'pop1' and 'pop2' are factors or characters, if needed
+    mutate(across(c(pop1, pop2), as.character))  # Convert to character if needed
+  
+  # Return the modified dataframe with the original name
+  return(df)
+})
+
+# Ensure the names are preserved
+names(fst_list) <- original_names
+
+original_names <- names(fst_points_list)
+
+fst_points_list <- lapply(names(fst_points_list), function(name) {
+  # Add the pops column and modify the dataframe
+  df <- fst_points_list[[name]] %>%
+    mutate(pops = name) %>%
+    mutate(pops = str_remove(pops, "\\.vs\\.fst")) %>%
+    # Split the 'pops' column into 'pop1' and 'pop2' by '.vs.'
+    separate(pops, into = c("pop1", "pop2"), sep = "\\.vs\\.") %>%
+    # Optionally, ensure that 'pop1' and 'pop2' are factors or characters, if needed
+    mutate(across(c(pop1, pop2), as.character))  # Convert to character if needed
+  
+  # Return the modified dataframe with the original name
+  return(df)
+})
+
+# Ensure the names are preserved
+names(fst_points_list) <- original_names
+
+```
+
+```{r}
+join_multiple_lists <- function(list_of_lists, join_by = c("chr", "pos")) {
+  joined_master_list <- list()
+
+  # Get all unique inner list names across all main lists
+  all_inner_names <- unique(unlist(lapply(list_of_lists, names)))
+
+  for (inner_name in all_inner_names) {
+    # Extract the dataframes with the current inner name from each main list
+    dfs_to_join <- list_of_lists %>%
+      map(~ .[[inner_name]]) %>%
+      compact() # Remove NULL elements (where the inner name doesn't exist)
+
+    # Perform the joins if there are dataframes to join
+    if (length(dfs_to_join) > 0) {
+      joined_df <- purrr::reduce(dfs_to_join, function(x, y) full_join(x, y, by = join_by))
+      joined_master_list[[inner_name]] <- joined_df
+    }
+  }
+
+  return(joined_master_list)
+}
+
+# pst_window_pop_list is a list of lists, where each inner list contains dataframes for a specific prefix (e.g., pst.cpgi) and the keys of the inner lists are the comparison names (e.g., pop1.vs.pop2.pst). Therefore the prefix can also be changed if you only want to do a subset (for example if I only wanteed to join cpgi, then I would replace ^pst with "^pst\\.cpgi")
+
+# Grab cpgi list names 
+lists_to_join <- pst_window_pop_list[grep("^cpgi|opensea|shore", names(pst_window_pop_list))]
+
+# Join these lists together
+joined_cpgi <- join_multiple_lists(lists_to_join)
+```
+
+
+```{r}
+join_dataframes <- function(fst_list, result_list) {
+  joined_list <- list()
+  
+  for (fst_name in names(fst_list)) {
+    for (result_name in names(result_list)) {
+      
+      # Check if the names match (excluding last 3 characters)
+      if (substr(fst_name, 1, nchar(fst_name) - 7) == substr(result_name, 1, nchar(result_name) - 4)) {
+        
+        # Perform the full join
+        joined_df <- full_join(fst_list[[fst_name]], result_list[[result_name]], 
+                               by = c("chr" = "chr", "window_start" = "pos"), 
+                               suffix = c(".fst", ".pst"))
+        
+        # Add the joined dataframe to the list
+        joined_list[[paste(fst_name, result_name, sep = ".joined.")]] <- joined_df
+        
+        # Break out of the inner loop since a match was found
+        break 
+      }
+    }
+  }
+  return(joined_list)
+}
+
+joined_fst_cpg <- join_dataframes(fst_list, joined_cpgi)
+
+```
+
+##Make correlation between bins 
+
+This will loop over the joined columns (IMPORTANT: add any column names that should be compared before running) and calculate the correlation between 10kb windows of the selected region and FST.
+
+```{r}
+calculate_correlation_and_plot <- function(df, y_column, df_name) {
+  # Filter out rows with NA in either column
+  filtered_df <- df %>%
+    filter(!is.na(fst), !is.na(!!sym(y_column)))
+
+  # Calculate correlation
+  corr.spear <- cor(filtered_df$fst, filtered_df[[y_column]])
+  correlation <- as.numeric(corr.spear)
+  #p.value <- corr.spear$p.value
+  
+  # Create scatterplot with geom_smooth
+  plot <- ggplot(filtered_df, aes(x = fst, y = !!sym(y_column))) +
+    geom_point() +
+    geom_smooth(method = "lm", se = TRUE) +
+    labs(
+      title = paste("Scatterplot of fst vs", y_column, "in", df_name),
+      x = "fst",
+      y = y_column,
+      subtitle = paste("Correlation:", round(correlation, 3))
+    )
+
+  # Return correlation value and plot
+  return(list(correlation = correlation,  plot = plot)) # p.value = p.value,
+}
+
+# Define the columns you want to compare with 'fst'
+columns_to_compare <- c("cpgi.pst", "cpgi_promoter.pst", "cpgi_intergenic.pst", "cpgi_intron.pst", "cpgi_exon.pst", "cpgi_TTS.pst",
+  "opensea.pst", "opensea_promoter.pst", "opensea_intron.pst", "opensea_intergenic.pst", "opensea_exon.pst", "opensea_TTS.pst",
+  "shore.pst", "shore_promoter.pst", "shore_intron.pst", "shore_intergenic.pst", "shore_exon.pst", "shore_TTS.pst")# Add all columns
+
+# Initialize an empty list to store all correlation results
+all_correlation_results <- list()
+
+# Loop through each dataframe in the joined_fst_cpg list
+for (df_name in names(joined_fst_cpg)) {
+  df <- joined_fst_cpg[[df_name]]
+
+  # Loop through each column to compare with 'fst'
+  for (y_column in columns_to_compare) {
+    # Check if the column exists in the current dataframe
+    if (y_column %in% names(df)) {
+      result <- calculate_correlation_and_plot(df, y_column, df_name)
+
+      # Store the results with informative names
+      all_correlation_results[[paste(df_name, "vs", y_column)]] <-
+        c(list(df_name = df_name, region = y_column), result)
+    } else {
+      cat(paste("Warning:", y_column, "not found in", df_name, "\n"))
+    }
+  }
+}
+
+# Extract correlation values into a dataframe
+correlation_df_all <- data.frame(
+  comparison = names(all_correlation_results),
+  df_name = sapply(all_correlation_results, `[[`, "df_name"),
+  region = sapply(all_correlation_results, `[[`, "region"),
+  correlation = sapply(all_correlation_results, `[[`, "correlation")
+  #p.value = sapply(all_correlation_results, `[[`, "p.value")
+)
+
+# Print the combined correlation dataframe
+print(correlation_df_all)
+
+# Print all the generated plots (optional)
+#for (result in all_correlation_results) {
+#  print(result$plot)
+#}
+
+```
+
+Look at how many windows are tested per comparison & compare high PST sites to low PST sites based on cutoff from hybrid zones
+From reviewer comments
+```{r}
+df <- joined_fst_cpg$gutturalis.vs.rustica.r.vs.fst.joined.gutturalis.vs.rustica.r.pst
+filtered_df <- df %>%
+    filter(!is.na(fst)) 
+
+comparisons <- data.frame(
+     column = colnames(filtered_df),
+     non_NA = colSums(!is.na(filtered_df)))
+
+comparisons <- comparisons %>%
+  filter(grepl("^(cpgi|opensea|shore)", column))
+
+
+#Next I want to see if windows containing high Pst sites identified from hybrid zone analyses also show higher FST
+sites_df <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/4_RGT_Hybrids/2_Parental_high_PST/1_RG_pst_outlier_positions.txt", header=T)
+
+sites_df <- sites_df %>%
+  separate(pst_prop.site.id, into = c("chr", "pos1", "pos2"), sep = "_", fill = "right") %>%
+  mutate(
+    pos1 = as.numeric(pos1),
+    pos2 = as.numeric(pos2),
+    site_start = ifelse(is.na(pos2), pos1, pos1),
+    site_end   = ifelse(is.na(pos2), pos1, pos2)
+  )
+
+filtered_high_PST_df <- filtered_df %>%
+  inner_join(sites_df, by = "chr") %>%
+  filter(
+    site_start >= window_start,
+    site_end   <= window_end
+  )
+
+filtered_low_PST_df <- filtered_df %>%
+  dplyr::anti_join(
+    filtered_PST_df,
+    by = c("chr", "window_start", "window_end")
+  )
+
+filtered_high_PST_df$PST <- "high"
+filtered_low_PST_df$PST <- "low"
+
+#subsample
+set.seed(11)
+
+filtered_low_PST_df_sub <- filtered_low_PST_df %>%
+  dplyr::slice_sample(n = 400)
+
+#merge dfs
+merged_df <- dplyr::bind_rows(filtered_high_PST_df, filtered_low_PST_df_sub)
+
+
+fst_means <- merged_df %>%
+  dplyr::group_by(PST) %>%
+  dplyr::summarise(mean_fst = mean(fst, na.rm = TRUE))
+
+#Plot
+ggplot(merged_df, aes(x = PST, y = fst)) +
+  geom_jitter(width = 0.15, alpha = 0.4) +
+  geom_line(
+    data = fst_means,
+    aes(x = PST, y = mean_fst, group = 1),
+    linewidth = 1
+  ) +
+  geom_point(
+    data = fst_means,
+    aes(x = PST, y = mean_fst),
+    size = 3
+  ) +
+  theme_classic() +
+  ylab("FST") +
+  xlab("PST category")
+
+
+```
+
+
+##Per chromosome plots
+```{r, echo=F, include=F}
+calculate_correlation_and_plot <- function(df, y_column, df_name, chromosome_val) {
+  # Filter the dataframe for the specific chromosome first
+  df_chr <- df %>%
+    filter(chr == chromosome_val) # Changed to 'chr'
+
+  # Filter out rows with NA in either fst or the y_column for the selected chromosome
+  filtered_df <- df_chr %>%
+    filter(!is.na(fst), !is.na(!!sym(y_column)))
+
+  # Check if there's enough data points (more than 10) and sufficient variation to calculate correlation and plot
+  if (nrow(filtered_df) < 10 || # Added condition: must have more than 10 values
+      length(unique(filtered_df$fst)) < 2 ||
+      length(unique(filtered_df[[y_column]])) < 2) {
+    warning(paste("Not enough unique data points or variation (or less than 10 values) to calculate correlation/plot for", y_column,
+                  "in", df_name, "on chromosome", chromosome_val, ". Skipping plot and correlation."))
+    return(list(correlation = NA, plot = NULL))
+  }
+
+  # Calculate correlation
+  correlation <- cor(filtered_df$fst, filtered_df[[y_column]])
+
+  # Create scatterplot with geom_smooth (this plot is no longer printed by default, but the function still returns it)
+  plot <- ggplot(filtered_df, aes(x = fst, y = !!sym(y_column))) +
+    geom_point(alpha = 0.6) + # Add transparency for better visualization of dense points
+    geom_smooth(method = "lm", se = TRUE, color = "blue") + # Linear model fit with confidence interval
+    labs(
+      title = paste("Scatterplot of fst vs", y_column, "in", df_name, " (", chromosome_val, ")"),
+      x = "FST",
+      y = y_column,
+      subtitle = paste("Correlation:", round(correlation, 3))
+    ) +
+    theme_minimal() + # Use a minimal theme for cleaner plots
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold"), # Center and bold title
+      plot.subtitle = element_text(hjust = 0.5) # Center subtitle
+    )
+
+  # Return correlation value and plot
+  return(list(correlation = correlation, plot = plot))
+}
+
+# Define the columns you want to compare with 'fst'
+# Add any column names that should be compared before running
+columns_to_compare <- c("cpgi.pst", "cpgi_promoter.pst", "cpgi_intergenic.pst", "cpgi_intron.pst", "cpgi_exon.pst", "cpgi_TTS.pst",
+  "opensea.pst", "opensea_promoter.pst", "opensea_intron.pst", "opensea_intergenic.pst", "opensea_exon.pst", "opensea_TTS.pst",
+  "shore.pst", "shore_promoter.pst", "shore_intron.pst", "shore_intergenic.pst", "shore_exon.pst", "shore_TTS.pst")
+
+# Initialize an empty list to store all correlation results and plots
+all_correlation_results <- list()
+
+# Loop through each dataframe in the joined_fst_cpg list
+for (df_name in names(joined_fst_cpg)) {
+  df <- joined_fst_cpg[[df_name]]
+
+  # Ensure the 'chr' column exists in the current dataframe
+  if (!"chr" %in% names(df)) { # Changed to 'chr'
+    cat(paste("Error: 'chr' column not found in dataframe", df_name, ". Skipping.\n"))
+    next # Skip to the next dataframe
+  }
+
+  # Get unique chromosome values from the current dataframe
+  unique_chromosomes <- unique(df$chr) # Changed to 'chr'
+
+  # Loop through each unique chromosome
+  for (chr in unique_chromosomes) {
+    # Loop through each column to compare with 'fst'
+    for (y_column in columns_to_compare) {
+      # Check if the y_column exists in the current dataframe
+      if (y_column %in% names(df)) {
+        # Calculate correlation and generate plot for the specific chromosome
+        result <- calculate_correlation_and_plot(df, y_column, df_name, chr)
+
+        # Store the results with informative names, including the chromosome
+        all_correlation_results[[paste(df_name, "vs", y_column, "on", chr)]] <-
+          c(list(df_name = df_name, region = y_column, chromosome = chr), result)
+      } else {
+        cat(paste("Warning:", y_column, "not found in", df_name, ". Skipping correlation for this column.\n"))
+      }
+    }
+  }
+}
+
+# Extract correlation values into a dataframe
+correlation_df_all <- data.frame(
+  comparison = names(all_correlation_results),
+  df_name = sapply(all_correlation_results, `[[`, "df_name"),
+  region = sapply(all_correlation_results, `[[`, "region"),
+  chromosome = sapply(all_correlation_results, `[[`, "chromosome"),
+  correlation = sapply(all_correlation_results, `[[`, "correlation")
+)
+
+# Remove rows where correlation is NA (due to insufficient data)
+correlation_df_all <- correlation_df_all %>%
+  filter(!is.na(correlation))
+
+# Print the combined correlation dataframe
+print(correlation_df_all)
+
+# Generate a box plot of correlations per chromosome, grouped by region type
+if (nrow(correlation_df_all) > 0) { # Only plot if there's data
+  box_plot <- ggplot(correlation_df_all, aes(x = chromosome, y = abs(correlation), fill = region)) +
+    geom_boxplot(position = position_dodge(width = 0.8)) + # Dodge boxes for different regions
+    labs(
+      title = "Correlation Distribution by Chromosome and Region Type",
+      x = "Chromosome",
+      y = "Correlation",
+      fill = "Region Type"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold"),
+      axis.text.x = element_text(angle = 45, hjust = 1) # Rotate x-axis labels for readability
+    ) +
+    scale_fill_brewer(palette = "Set3") # Use a color-blind friendly palette for fill
+
+  print(box_plot)
+} else {
+  cat("No valid correlation data to generate the box plot.\n")
+}
+
+# Print individual scatterplots for chromosomes 30 and bigger
+# Note: This can still generate many plots depending on your data.
+for (result_name in names(all_correlation_results)) {
+  result <- all_correlation_results[[result_name]]
+  # Extract the numeric part of the chromosome string
+  chr_numeric <- suppressWarnings(as.numeric(gsub("chr", "", result$chromosome)))
+
+  # Check if the plot exists and the chromosome number is 30 or greater
+  if (!is.null(result$plot) && !is.na(chr_numeric) && chr_numeric >= 30) {
+    print(result$plot)
+  }
+}
+
+
+###driven by having 1 or two outliers loci with high FST and high PST
+```
+
+
+```{r}
+correlation_df_all <- correlation_df_all %>%
+  group_by(df_name) %>%
+  mutate(
+    correlation = if_else(
+      region == "opensea_TTS.pst",
+      correlation[region == "shore_TTS.pst"],
+      correlation
+    )
+  ) %>%
+  ungroup()
+
+# 1. Assign funcitonal regions
+correlation_df_all <- correlation_df_all %>%
+  mutate(
+    functional_category = case_when(
+      str_detect(region, "promoter") ~ "Promoter",
+      str_detect(region, "intergenic") ~ "Intergenic",
+      str_detect(region, "exon") ~ "Exon",
+      str_detect(region, "intron") ~ "Intron",
+      str_detect(region, "TTS") ~ "TTS",
+      TRUE ~ "Total" # fallback
+    )
+  )
+
+# 2. Assign colors based on correlation type prefix
+correlation_df_all <- correlation_df_all %>%
+  mutate(
+    color_group = case_when(
+      region == "cpgi.pst" ~ "CpG islands",
+      region == "opensea.pst" ~ "CpG sites",
+      region == "shore.pst" ~ "CpG flanks",
+      startsWith(region, "cpgi") ~ "CpG island regions",
+      startsWith(region, "opensea") ~ "CpG regions",
+      startsWith(region, "shore") ~ "CpG flank regions",
+      TRUE ~ "other" #for edge cases if they exist.
+    )
+  )
+
+# 2. Assign colors based on correlation type prefix
+correlation_df_all <- correlation_df_all %>%
+  mutate(
+    group = case_when(
+      startsWith(region, "cpgi") ~ "CpG islands",
+      startsWith(region, "opensea") ~ "CpG sites",
+      startsWith(region, "shore") ~ "CpG flanks",
+      TRUE ~ "other" #for edge cases if they exist.
+    )
+  )
+
+# 3. Define color palette
+color_palette <- c(
+  "CpG islands" = "darkblue",
+  "CpG sites" = "darkorange3",
+  "CpG flanks" = "coral",
+  "CpG island regions" = "lightblue",
+  "CpG regions" = "orange",
+  "CpG flank regions" = "lightpink"
+)
+
+# 3. Define color palette
+color_palette <- c(
+  "CpG islands" = "darkblue",
+  "CpG sites" = "darkblue",
+  "CpG flanks" = "darkblue",
+  "CpG island regions" = "lightblue",
+  "CpG regions" = "lightblue",
+  "CpG flank regions" = "lightblue"
+)
+# Force the facet order (make sure "Total" is in your data)
+correlation_df_all <- correlation_df_all %>%
+  mutate(functional_category = factor(functional_category, levels = c("TTS", "Exon", "Intron", "Intergenic", "Promoter", "Total")))
+
+#correlation_df_all <- correlation_df_all %>%
+#  mutate(group = factor(functional_category, levels = c("CpG sites", "CpG islands", "CpG flanks")))
+
+# Plot
+p <- ggplot(correlation_df_all, aes(x = functional_category, y = correlation, fill = color_group)) +
+  geom_boxplot(
+    outlier.shape = 21,        # only draw outliers as points
+    outlier.size = 1.5,
+    outlier.fill = "white",    # or map to fill/color_group if desired
+    outlier.color = "black",
+    coef = 1.5,                # default: defines whisker length for outliers
+    width = 0.7
+  ) +
+  scale_fill_manual(values = color_palette) +
+  labs(
+    x = "Region",
+    y = "Rho (ρ)",
+    fill = "Correlation Group"
+  ) +
+  facet_grid(. ~ group, scales = "free_y", space = "free_y") +  # keep facet titles on top
+  coord_flip() +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(size = 12),
+    legend.position = "none",
+    axis.title.x = element_text(size = 13, face = "bold"),
+    axis.title.y = element_blank(),
+    strip.text = element_text(size = 12, face = "bold"),
+    panel.spacing.x = unit(.3, "cm"),
+    axis.text.y.right = element_blank(),
+    axis.ticks.y.right = element_blank(),
+    axis.text.y = element_text(size = 12),
+    axis.ticks.y = element_blank(),
+    panel.grid.major.y = element_blank()  # optional, remove extra horizontal grid lines
+  )
+p
+
+# 4. Create the boxplot with colors  _--OLD BOXPLOT
+ggplot(correlation_df_all, aes(x = functional_category, y = correlation, fill = color_group)) +
+  geom_boxplot() +
+   geom_jitter(width = 0.2, alpha = 0.5) +
+  scale_fill_manual(values = color_palette) +
+  labs(
+    #title = "Correlation Values by Type",
+    x = "Region",
+    y = "Correlation Value",
+    fill = "Correlation Group" # Legend title
+  ) +
+  facet_wrap(~group) +
+   theme_minimal()+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+correlation_df_all <- correlation_df_all %>%
+  mutate(region_group = case_when(
+    grepl("All", region) ~ "All CpG sites",
+    grepl("island", region) ~ "Island",
+    grepl("Flank", region) ~ "Flank",
+    TRUE ~ "Other"
+  ))
+
+# Plot with flipped coordinates and faceting
+ggplot(correlation_df_all, aes(x = region, y = correlation, fill = color_group)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, alpha = 0.5) +
+  scale_fill_manual(values = color_palette) +
+  labs(
+    x = "Region",
+    y = "Correlation Value",
+    fill = "Correlation Group"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  coord_flip() +
+  facet_wrap(~region_group, scales = "free_y", ncol = 1)
+
+```
+
+save plot
+```{r}
+ggsave("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/2_Genome_Scan/3_window_correlation/1_Figure2c_10kb_correlation.png", plot = p, width = 8, height = 2.5, units = "in", dpi = 500)
+```
+
+##PLot based on rank
+
+```{r}
+correlation_df_all <- tibble(
+  #df_name = rep(df_names_sample, each = 4), # 3 df_names, each with 4 regions
+  region = rep(c("cpgi.pst", "cpgi.in.pst", "opensea.pst", "opensea.i.pst"), times = 3),
+  correlation = runif(12, -0.2, 0.8) # Sample correlation values
+) %>%
+  # Add other columns if necessary, matching your real data structure
+  mutate(
+    comparison = paste(df_name, "vs", region), # Simulate comparison column
+    color_group = case_when(
+      region == "cpgi.pst" ~ "cpgi",
+      region == "opensea.pst" ~ "opensea",
+      startsWith(region, "cpgi") ~ "cpgi_regional",
+      startsWith(region, "opensea") ~ "opensea_regional",
+      TRUE ~ "other"
+    )
+  )
+
+# --- Concise Data Transformation for Ranking Plot ---
+plot_rank_df <- correlation_df_all %>%
+  # 1. Filter for only the 'cpgi.pst' and 'opensea.pst' correlations
+  filter(region %in% c("cpgi.pst", "opensea.pst")) %>%
+  # 2. Pivot wider to get 'cpgi.pst' and 'opensea.pst' correlations as columns
+  #    Each row will now represent a unique 'df_name' (population)
+  pivot_wider(
+    id_cols = df_name,          # The unique identifier for each row
+    names_from = region,        # Create new column names from 'region' values
+    values_from = correlation   # Populate new columns with 'correlation' values
+  ) %>%
+  # 3. Calculate ranks for each PST type (across all populations)
+  mutate(
+    rank_cpgi_pst = rank(cpgi.pst, ties.method = "average"),
+    rank_opensea_pst = rank(opensea.pst, ties.method = "average")
+  ) %>%
+  # 4. Pivot longer again to prepare for plotting (one row per df_name, per PST type rank)
+  pivot_longer(
+    cols = c(rank_cpgi_pst, rank_opensea_pst), # The rank columns we just created
+    names_to = "PST_Source",                   # New column to indicate which rank it is
+    values_to = "Rank"                         # New column for the actual rank value
+  ) %>%
+  # 5. Clean up PST_Source names for better axis labels/legend
+  mutate(
+    PST_Source = case_when(
+      PST_Source == "rank_cpgi_pst" ~ "CPGI PST Correlation Rank",
+      PST_Source == "rank_opensea_pst" ~ "Opensea PST Correlation Rank",
+      TRUE ~ PST_Source
+    )
+  )
+
+# Define colors for the lines (one color per df_name/population)
+num_dfs <- length(unique(plot_rank_df$df_name))
+# Using hue_pal to get a distinct color for each 'df_name'
+line_colors <- scales::hue_pal()(num_dfs)
+names(line_colors) <- unique(plot_rank_df$df_name)
+
+
+ggplot(plot_rank_df, aes(x = PST_Source, y = Rank, group = df_name, color = df_name)) +
+  geom_line(alpha = 0.6, size = 1) + # Draw lines connecting ranks
+  geom_point(alpha = 0.8, size = 2) + # Add points at each rank
+  scale_color_manual(values = line_colors) + # Apply dynamic colors
+  labs(
+    title = "Rank Consistency of PST Correlation Values",
+    subtitle = "Between CPGI.PST and Opensea.PST across Populations",
+    x = "PST Source (Correlation Rank)",
+    y = "Rank of Correlation Value",
+    color = "Population" # Legend title for df_name
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5),
+    legend.position = "bottom"
+  )
+
+```
+
+
+
+```{r}
+corr_results <- correlation_df_all %>%
+  pivot_wider(
+    id_cols = df_name,
+    names_from = region,
+    values_from = correlation
+  )
+
+#Write table out and added geographic and fst valeus to look at correlation between
+#write.table(corr_results, file="/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/2_Genome_Scan/2_correlation_10kb_results.txt", quote=F, row.names=F)
+
+#Read in table with distances
+corr_results <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/2_Genome_Scan/3_window_correlation/1_correlation_distance_10kb_results.txt", header=T)
+
+geo_dist <- corr_results$d.geo.pop.hav
+cpgi_i <- corr_results$cpgi.i.pst
+cpgi_in <- corr_results$cpgi.in.pst
+cpgi_p <- corr_results$cpgi.p.pst
+cpgi_t <- corr_results$cpgi.pst
+gen_dist <- corr_results$d.gen.pop
+
+opensea_i <- corr_results$opensea.i.pst
+opensea_in <- corr_results$opensea.in.pst
+opensea_p <- corr_results$opensea.p.pst
+opensea_t <- corr_results$opensea.pst
+
+```
+
+```{r}
+# Define the columns you want to correlate and plot
+cpgi_cols <- c("cpgi.pst", "cpgi.i.pst", "cpgi.in.pst", "cpgi.p.pst")
+opensea_cols <- c("opensea.pst", "opensea.i.pst", "opensea.in.pst", "opensea.p.pst")
+
+# Function to calculate correlation and create plots
+cor_and_plot <- function(df, x_var, y_var, x_label, y_label) {
+  correlation <- cor(df[[x_var]], df[[y_var]])
+
+  plot <- ggplot(df, aes(x = .data[[x_var]], y = .data[[y_var]])) +
+    geom_point() +
+    geom_smooth(method="lm", se = TRUE) +
+    theme_minimal() +
+    labs(
+      title = paste("Correlation between", x_label, "and", y_label),
+      subtitle = paste("Correlation:", round(correlation, 3)),
+      x = x_label,
+      y = y_label
+    )
+
+  return(list(correlation = correlation, plot = plot))
+}
+
+# Loop through each cpgi column and perform correlation and plotting
+for (cpgi_col in cpgi_cols) {
+  # Correlation with geo.dist
+  geo_results <- cor_and_plot(corr_results, "d.geo.pop.hav", cpgi_col, "Geographic Distance", cpgi_col)
+  print(paste("Correlation (geo.dist vs", cpgi_col, "):", geo_results$correlation))
+  print(geo_results$plot)
+
+  # Correlation with fst
+  fst_results <- cor_and_plot(corr_results, "d.gen.pop", cpgi_col, "Genetic Distance", cpgi_col)
+  print(paste("Correlation (fst vs", cpgi_col, "):", fst_results$correlation))
+  print(fst_results$plot)
+}
+```
+
+
+```{r}
+
+# Loop through each opensea column and perform correlation and plotting
+for (opensea_col in opensea_cols) {
+  # Correlation with geo.dist
+  geo_results <- cor_and_plot(corr_results, "d.geo.pop.hav", opensea_col, "Geographic Distance", opensea_col)
+  print(paste("Correlation (geo.dist vs", opensea_col, "):", geo_results$correlation))
+  print(geo_results$plot)
+
+  # Correlation with fst
+  fst_results <- cor_and_plot(corr_results, "d.gen.pop", opensea_col, "Genetic Distance", opensea_col)
+  print(paste("Correlation (gen.dist vs", opensea_col, "):", fst_results$correlation))
+  print(fst_results$plot)
+}
+
+
+```
+
+
+#Plot all together
+```{r}
+# Define the columns you want to correlate and plot
+cpgi_cols <- c("cpgi.pst", "cpgi.i.pst")
+opensea_cols <- c("opensea.pst", "opensea.i.pst")
+
+# Combine all PST columns into a single vector
+all_pst_cols <- c(cpgi_cols, opensea_cols)
+
+# --- 2. New Function to plot multiple correlations on one graph ---
+# This function will take a single x_var and a vector of y_vars
+plot_multiple_correlations <- function(df, x_var, y_vars, x_label, y_label_generic) {
+
+  # 2.1. Reshape the data from wide to long format
+  plot_data_long <- df %>%
+    select(all_of(c(x_var, y_vars))) %>%
+    pivot_longer(
+      cols = all_of(y_vars),
+      names_to = "PST_Type",
+      values_to = "PST_Value"
+    )
+
+  # 2.2. Calculate correlations for each PST_Type against the x_var
+  correlations_df <- plot_data_long %>%
+    group_by(PST_Type) %>%
+    summarise(
+      correlation = cor(.data[[x_var]], PST_Value, use = "pairwise.complete.obs")
+    ) %>%
+    ungroup()
+
+  # 2.3. Define custom color palette
+  # Ensure these names match the 'PST_Type' values exactly after pivot_longer
+  custom_colors <- c(
+    "cpgi.pst" = "#131e3a",   # Darker Blue
+    "cpgi.i.pst" = "#a6cee3", # Lighter Blue
+    "cpgi.in.pst" = "#33a02c", # Another blue shade (or green-blue)
+    "cpgi.p.pst" = "#4682b8", # Lighter green-blue
+
+    "opensea.pst" = "#ff7f00",   # Darker Orange
+    "opensea.i.pst" = "#fdbf6f", # Lighter Orange
+    "opensea.in.pst" = "#e31a1c", # Another orange shade (or red-orange)
+    "opensea.p.pst" = "#f4ab6a"  # Lighter red-orange
+  )
+
+  # Filter custom_colors to only include those present in the current plot_data_long
+  # This prevents errors if a y_vars vector passed to the function is a subset of all_pst_cols
+  # and thus some colors in custom_colors would not have corresponding data.
+  present_pst_types <- unique(plot_data_long$PST_Type)
+  colors_for_plot <- custom_colors[names(custom_colors) %in% present_pst_types]
+
+
+  # 2.4. Create the combined plot
+  plot <- ggplot(plot_data_long, aes(x = .data[[x_var]], y = PST_Value, color = PST_Type)) +
+    geom_point(alpha = 0.6) +
+    geom_smooth(method = "lm", se = FALSE) +
+    theme_minimal() +
+    labs(
+      x = x_label,
+      y = y_label_generic,
+      color = "PST Type" # Label for the color legend
+    ) +
+    theme(
+      axis.text.x = element_text(size = 12, face = "bold"), # Rotate and bold x-axis labels
+      axis.text.y = element_text(size = 12, face = "bold"), # Bold y-axis tick labels
+      axis.title.x = element_text(size = 14, face = "bold"), # Bold x-axis title
+      axis.title.y = element_text(size = 14, face = "bold"), # Bold y-axis title
+      legend.position = "bottom",
+      plot.title = element_text(hjust = 0.5)
+    ) +
+    scale_color_manual(values = colors_for_plot) # Apply the custom color palette
+
+  return(list(correlations = correlations_df, plot = plot))
+}
+
+# --- 3. Generate the two desired plots ---
+
+# Plot 1: All PST types vs Geographic Distance
+cat("\n--- All PST types vs Geographic Distance ---\n")
+geo_all_pst_results <- plot_multiple_correlations(
+  corr_results,
+  "d.geo.pop.hav",
+  all_pst_cols, # Use the combined vector
+  "Geographic Distance",
+  "PST/FST correlation"
+)
+print("Correlations:")
+print(geo_all_pst_results$correlations)
+print(geo_all_pst_results$plot) # Display the plot
+
+# Plot 2: All PST types vs Genetic Distance
+cat("\n--- All PST types vs Genetic Distance ---\n")
+gen_all_pst_results <- plot_multiple_correlations(
+  corr_results,
+  "d.gen.pop",
+  all_pst_cols, # Use the combined vector
+  "Genetic Distance",
+  "PST/FST correlation"
+)
+print("Correlations:")
+print(gen_all_pst_results$correlations)
+print(gen_all_pst_results$plot) # Display the plot
+
+#ggsave("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/2_Genome_Scan/2_correlation_10kb_geodist.png", plot = geo_all_pst_results$plot, width = 8, height = 5, dpi = 600)
+
+#ggsave("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/2_Genome_Scan/2_correlation_10kb_gendist.png", plot = gen_all_pst_results$plot , width = 8, height = 5, dpi = 600)
+
+```
+#Mantel Test
+Instead of running correlation, I want to compare the independence metric (correlation between PST/FST) to the geographic distance and genetic distance
+
+see mantel script....might be easier to pull from there
+```{r}
+create_population_distance_matrices <- function(df, columns) {
+  unique_pops <- unique(c(df$pop1, df$pop2))
+  num_unique_pops <- length(unique_pops)
+  matrices_list <- list()
+
+  for (col in columns) {
+    if (col %in% names(df)) {
+      dist_matrix <- matrix(NA, nrow = num_unique_pops, ncol = num_unique_pops)
+      rownames(dist_matrix) <- unique_pops
+      colnames(dist_matrix) <- unique_pops
+
+      for (i in 1:num_unique_pops) {
+        for (j in 1:num_unique_pops) {
+          if (i > j) { # Changed the condition to i > j for the lower diagonal
+            pop_i <- unique_pops[i]
+            pop_j <- unique_pops[j]
+
+            # Find the rows in df corresponding to this population pair
+            value_pop_i <- df %>%
+              filter((pop1 == pop_i & pop2 == pop_j) | (pop1 == pop_j & pop2 == pop_i)) %>%
+              pull(!!sym(col))
+
+            # If the comparison exists, store the value
+            if (length(value_pop_i) == 1) {
+              dist_matrix[pop_i, pop_j] <- value_pop_i
+            }
+          }
+        }
+      }
+      matrices_list[[col]] <- dist_matrix
+    } else {
+      cat(paste("Warning: Column", col, "not found in the dataframe.\n"))
+    }
+  }
+  return(matrices_list)
+}
+
+# Assuming 'corr_results' is your dataframe
+# Specify the columns for which you want to create distance matrices
+pst_columns <- grep("\\.pst$", names(corr_results), value = TRUE)
+columns_for_mantel <- c(pst_columns, "d.geo.pop.hav", "d.gen.pop")
+
+# Create the population-based matrices with values in the lower diagonal
+mantel_matrices_pops <- create_population_distance_matrices(corr_results, columns_for_mantel)
+
+# Print the resulting list of matrices
+print(mantel_matrices_pops)
+
+```
+
+```{r}
+#Pull PST columns names to run for Mantel tests
+pst_matrices_names <- grep("\\.pst$", names(mantel_matrices_pops), value = TRUE)
+
+# Initialize an empty list to store the results
+mantel_results_df_list <- list()
+
+# Function to run Mantel test and create a dataframe
+run_mantel_and_df <- function(matrix1, matrix1_name, matrix2, matrix2_name) {
+  cat(paste("Running Mantel test for", matrix1_name, "and", matrix2_name, "\n"))
+  mantel_result <- mantel(matrix1, matrix2,
+                         method = "spearman", permutations = 9999, na.rm = TRUE)
+  statistic <- mantel_result$statistic
+  p_value <- mantel_result$signif
+  data.frame(
+    Column1 = matrix1_name,
+    Column2 = matrix2_name,
+    Mantel_Statistic = statistic,
+    P_value = p_value
+  )
+}
+
+# Compare geo.dist to all .pst columns
+if ("d.geo.pop.hav" %in% names(mantel_matrices_pops)) {
+  for (pst_name in pst_matrices_names) {
+    result_df <- run_mantel_and_df(
+      mantel_matrices_pops$d.geo.pop.hav, "d.geo.pop.hav",
+      mantel_matrices_pops[[pst_name]], pst_name
+    )
+    mantel_results_df_list[[paste("d.geo.pop.hav_vs", pst_name, sep = "_")]] <- result_df
+  }
+} else {
+  cat("Warning: 'geo.dist' matrix not found in mantel_matrices_pops.\n")
+}
+
+# Compare geo.dist to genetic distance
+if ("d.geo.pop.hav" %in% names(mantel_matrices_pops) && "d.gen.pop" %in% names(mantel_matrices_pops)) {
+  result_df_gen_geo <- run_mantel_and_df(
+    mantel_matrices_pops$d.geo.pop.hav, "d.geo.pop.hav",
+    mantel_matrices_pops$d.gen.pop, "d.gen.pop"
+  )
+  mantel_results_df_list[["d.geo.pop.hav_vs_"]] <- result_df_gen_geo
+} else if (!("d.geo.pop.hav" %in% names(mantel_matrices_pops))) {
+  cat("Warning: 'd.geo.pop.hav' matrix not found in mantel_matrices_pops.\n")
+} else {
+  cat("Warning: 'd.gen.pop' matrix not found in mantel_matrices_pops.\n")
+}
+
+# Compare all .pst columns to the genetic distance column
+if ("d.gen.pop" %in% names(mantel_matrices_pops)) {
+  for (pst_name in pst_matrices_names) {
+    result_df_pst_fst <- run_mantel_and_df(
+      mantel_matrices_pops[[pst_name]], pst_name,
+      mantel_matrices_pops$d.gen.pop, "d.gen.pop"
+    )
+    mantel_results_df_list[[paste(pst_name, "vs_gen_dist", sep = "_")]] <- result_df_pst_fst
+  }
+} else {
+  cat("Warning: 'fst' matrix not found in mantel_matrices_pops.\n")
+}
+
+# Combine all the dataframes in the list into a single dataframe
+mantel_results_df <- do.call(rbind, mantel_results_df_list)
+
+# Print the final dataframe
+cat("\nFinal Mantel Test Results Dataframe:\n")
+print(mantel_results_df)
+```
+Partial mantel holding geo.constant
+
+```{r}
+# Pull PST columns names to run for Mantel tests
+pst_matrices_names <- grep("\\.pst$", names(mantel_matrices_pops), value = TRUE)
+
+# Initialize an empty list to store the results
+mantel_partial_results_df_list <- list()
+
+# Function to run partial Mantel test and create a dataframe
+run_partial_mantel_and_df <- function(matrix1, matrix1_name, matrix2, matrix2_name, matrix3, matrix3_name) {
+  cat(paste("Running Partial Mantel test for", matrix1_name, "and", matrix2_name, "partialling out", matrix3_name, "\n"))
+  mantel_result <- mantel.partial(matrix1, matrix2, matrix3,
+                                  method = "spearman", permutations = 9999, na.rm = TRUE)
+  statistic <- mantel_result$statistic
+  p_value <- mantel_result$signif
+  data.frame(
+    Column1 = matrix1_name,
+    Column2 = matrix2_name,
+    Partialled_Out = matrix3_name,
+    Mantel_Statistic = statistic,
+    P_value = p_value
+  )
+}
+
+# Compare geo.dist to all .pst columns, partialling out genetic distance
+if ("d.geo.pop.hav" %in% names(mantel_matrices_pops) && "d.gen.pop" %in% names(mantel_matrices_pops)) {
+  for (pst_name in pst_matrices_names) {
+    result_df <- run_partial_mantel_and_df(
+      mantel_matrices_pops$d.geo.pop.hav, "d.geo.pop.hav",
+      mantel_matrices_pops[[pst_name]], pst_name,
+      mantel_matrices_pops$d.gen.pop, "d.gen.pop"
+    )
+    mantel_partial_results_df_list[[paste("d.geo.pop.hav_vs", pst_name, "_partial_gen", sep = "_")]] <- result_df
+  }
+} else {
+  if (!("d.geo.pop.hav" %in% names(mantel_matrices_pops))){
+    cat("Warning: 'd.geo.pop.hav' matrix not found in mantel_matrices_pops.\n")
+  }
+  if (!("d.gen.pop" %in% names(mantel_matrices_pops))){
+    cat("Warning: 'd.gen.pop' matrix not found in mantel_matrices_pops.\n")
+  }
+
+}
+
+# Compare geo.dist to genetic distance, partialling out a third matrix.
+if ("d.geo.pop.hav" %in% names(mantel_matrices_pops) && "d.gen.pop" %in% names(mantel_matrices_pops)) {
+  result_df_gen_geo <- run_partial_mantel_and_df(
+    mantel_matrices_pops$d.geo.pop.hav, "d.geo.pop.hav",
+    mantel_matrices_pops$d.gen.pop, "d.gen.pop",
+    # There is no obvious third matrix to partial out here.  I'm leaving this as is.
+    mantel_matrices_pops$d.gen.pop, "d.gen.pop" # Changed to a placeholder, you might need to adjust.
+  )
+  mantel_partial_results_df_list[["d.geo.pop.hav_vs_d.gen.pop_partial"]] <- result_df_gen_geo #Added "_partial" to name
+} else if (!("d.geo.pop.hav" %in% names(mantel_matrices_pops))) {
+  cat("Warning: 'd.geo.pop.hav' matrix not found in mantel_matrices_pops.\n")
+} else {
+  cat("Warning: 'd.gen.pop' matrix not found in mantel_matrices_pops.\n")
+}
+
+
+# Compare all .pst columns to the genetic distance column, partialling out geographic distance
+if ("d.gen.pop" %in% names(mantel_matrices_pops) && "d.geo.pop.hav" %in% names(mantel_matrices_pops)) {
+  for (pst_name in pst_matrices_names) {
+    result_df_pst_fst <- run_partial_mantel_and_df(
+      mantel_matrices_pops[[pst_name]], pst_name,
+      mantel_matrices_pops$d.gen.pop, "d.gen.pop",
+      mantel_matrices_pops$d.geo.pop.hav, "d.geo.pop.hav"
+    )
+    mantel_partial_results_df_list[[paste(pst_name, "vs_gen_dist_partial_geo", sep = "_")]] <- result_df_pst_fst #Added "_partial_geo"
+  }
+} else {
+  if (!("d.gen.pop" %in% names(mantel_matrices_pops))){
+    cat("Warning: 'd.gen.pop' matrix not found in mantel_matrices_pops.\n")
+  }
+  if (!("d.geo.pop.hav" %in% names(mantel_matrices_pops))){
+    cat("Warning: 'd.geo.pop.hav' matrix not found in mantel_matrices_pops.\n")
+  }
+}
+# Combine all the dataframes in the list into a single dataframe
+mantel_partial_results_df <- do.call(rbind, mantel_partial_results_df_list)
+
+# Print the final dataframe
+cat("\nFinal Partial Mantel Test Results Dataframe:\n")
+print(mantel_partial_results_df)
+```
+
+
+```{r}
+# Plot the only 2 that had significant-adjacent results 
+# Create the plot
+plot <- ggplot(corr_results, aes(x = geo_dist, y = corr_results$opensea.i.pst)) +
+  geom_point() +
+  geom_smooth(method="lm") +
+  #geom_hline(yintercept = 0, linetype = "dashed", color = "red") + # Add a horizontal line at 0
+  labs(
+    title = "Mantel Test Results",
+    x = "",
+    y = "Correlation - Opensea-GEO"
+  ) +
+  theme_minimal()
+
+# Print the plot
+print(plot)
+
+# Create the plot
+plot <- ggplot(corr_results, aes(x = geo_dist, y = corr_results$fst)) +
+  geom_point() +
+  geom_smooth(method="lm") +
+  #geom_hline(yintercept = 0, linetype = "dashed", color = "red") + # Add a horizontal line at 0
+  labs(
+    title = "Mantel Test Results",
+    x = "",
+    y = "Correlation - FST.GEO"
+  ) +
+  theme_minimal()
+
+# Print the plot
+print(plot)
+
+
+##Non-significant comparison
+# Create the plot
+plot <- ggplot(corr_results, aes(x = geo_dist, y = corr_results$cpgi.pst)) +
+  geom_point() +
+  geom_smooth(method="lm") +
+  #geom_hline(yintercept = 0, linetype = "dashed", color = "red") + # Add a horizontal line at 0
+  labs(
+    title = "Mantel Test Results",
+    x = "",
+    y = "Correlation - islands.GEO"
+  ) +
+  theme_minimal()
+
+# Print the plot
+print(plot)
+
+##Non-significant comparison
+# Create the plot
+plot <- ggplot(corr_results, aes(x = geo_dist, y = corr_results$cpgi.p.pst)) +
+  geom_point() +
+  geom_smooth(method="lm") +
+  #geom_hline(yintercept = 0, linetype = "dashed", color = "red") + # Add a horizontal line at 0
+  labs(
+    title = "Mantel Test Results",
+    x = "",
+    y = "Correlation - prmoter.islands.GEO"
+  ) +
+  theme_minimal()
+
+# Print the plot
+print(plot)
+
+```
+
+```{r}
+# Assuming you have correlation_df_all and mantel_results_df
+#0. Pivot corr_results longer to plot
+correlation_df_all <- corr_results %>%
+  pivot_longer(cols=c(4:11), names_to = "region", values_to = "correlation")
+
+
+# 1. Calculate Average Correlations per Region
+average_correlations_region <- correlation_df_all %>%
+  group_by(region) %>% # Adjust grouping columns based on your data
+  summarise(Average_Correlation = mean(correlation, na.rm = TRUE)) %>%
+  ungroup()
+
+average_correlations_region <- rbind(average_correlations_region, average_correlations_region)
+
+average_correlations_region <- average_correlations_region %>%
+  mutate(variable = c(rep("d.geo.pop.hav", 8), rep("d.gen.pop", 8)))
+
+# 2. Restructure Average Correlation Data for Heatmap
+heatmap_data <- average_correlations_region %>%
+  pivot_wider(id_cols = region, names_from = variable, values_from = Average_Correlation)
+
+# Convert to long format for ggplot2
+heatmap_long <- heatmap_data %>%
+  pivot_longer(cols = -region, names_to = "variable", values_to = "Average_Correlation")
+
+# Rename columns to match join keys if needed
+heatmap_long <- heatmap_long %>%
+  rename(Column1 = region, Column2 = variable)
+
+heatmap_long <- heatmap_long %>%
+  arrange(Column2)# Assuming Var1 and Var2 match column names in mantel_results_df
+
+# 3. Join with Mantel Test Results
+# You might need to adjust the join keys based on how your mantel_results_df is structured
+# Example join assuming Column1 and Column2 in both dataframes represent the compared variables
+mantel_results_df <- mantel_results_df %>% filter(!(Column1 == "d.geo.pop.hav" & Column2 == "d.gen.pop"))
+
+joined_data.1 <- heatmap_long[1:8,] %>%
+  left_join(mantel_results_df[9:16,], by = c("Column1", "Column2"))
+
+joined_data.2 <- heatmap_long[9:16,] %>%
+  left_join(mantel_results_df[1:8,], by = c("Column1" = "Column2", "Column2" = "Column1"))
+
+joined_data <- rbind(joined_data.1, joined_data.2)
+
+# 4. Create the Heatmap with Significance Overlay
+ggplot(joined_data, aes(x = Column1, y = Column2)) +
+  geom_tile(fill = joined_data$Average_Correlation) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0,
+                       name = "Avg. Correlation") +
+  # Overlay for Mantel Test Significance
+  geom_tile(aes(fill = ifelse(P_value < 0.01, "Mantel p < 0.01",
+                               ifelse(P_value < 0.05, "Mantel p < 0.05", "Not Significant"))),
+            alpha = 0.4) + # Adjust alpha for visibility
+  scale_fill_manual(values = c("Mantel p < 0.01" = "darkgreen",
+                               "Mantel p < 0.05" = "lightgreen",
+                               "Not Significant" = NA),
+                    name = "Mantel Significance",
+                    na.value = NA) +
+  labs(title = "Average Correlations and Mantel Test Significance",
+       x = "", y = "") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  coord_fixed() # To make cells square
+
+#Plot with squares for significant Mantel test and color for correlation
+ggplot(joined_data, aes(x = Column1, y = Column2)) +
+  geom_tile(aes(fill = Average_Correlation)) +
+  scale_fill_gradient2(low = "blue", mid = "lightgreen", high = "darkgreen", midpoint = 0,
+                       name = "Avg. Correlation") +
+  # Add black boxes ONLY where P_value < 0.05
+  geom_tile(data = joined_data %>% filter(P_value < 0.1),
+            aes(width = 0.3, height = 0.3),
+            fill = "black", color = NA) +
+  labs(title = "Average Correlations and Mantel Test Significance",
+       x = "", y = "") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  coord_fixed()
+```
+
+

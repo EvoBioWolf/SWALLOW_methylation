@@ -1,0 +1,223 @@
+---
+title: "Plot Rho by category"
+author: "Sarah Mueller"
+date: "2025-09-19"
+output: html_document
+---
+
+
+Load in results of correlation tests
+
+```{r}
+library(dplyr)
+library(stringr)
+
+all_regions_pst <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST_FST_gw/1_rho_FST_per_category_results.txt", header=T)
+
+all_site_pst <-read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST_FST_gw/1_rho_FST_all_results.txt", header=T)
+
+all_site_pst <- all_site_pst %>% 
+  filter(grepl("^opensea", Annotation))
+
+all_site_pst <- all_site_pst %>%
+  mutate(Annotation = sub("^opensea", "all", Annotation))
+
+all_pst <- rbind(all_regions_pst, all_site_pst)
+
+##Number of sites per regions
+regions <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_Pre-processing/4_methyl_calling/1_CpG_islands/0_homer_cpgi_join_summary_168.txt", header=T)
+colnames(regions) <- "Regions"
+sites <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_Pre-processing/4_methyl_calling/1_CpG_islands/0_homer_loci_join_summary_168.txt", header=T)
+colnames(sites) <- "Sites"
+
+sites <- cbind(sites, regions)
+sites$Category <- rownames(sites)
+
+sites_summary <- sites %>%
+  # extract suffix (everything after the last "_")
+  mutate(Category = str_extract(Category, "[^_]+$")) %>%
+  # group by suffix and sum
+  group_by(Category) %>%
+  summarise(
+    Sites = sum(Sites),
+    Regions = sum(as.numeric(Regions)),  # convert Regions to numeric before summing
+    .groups = "drop"
+  )
+
+sites <- rbind(sites, sites_summary)
+
+sites <- sites %>%
+  mutate(
+    prop.sites = case_when(
+      str_starts(Category, "island") ~ NA,
+      str_starts(Category, "shore")  ~ NA,
+      TRUE                           ~ Sites / 376106
+    ),
+    prop.regions = case_when(
+      str_starts(Category, "island") ~ as.numeric(Regions) / 11456,
+      str_starts(Category, "shore")  ~ as.numeric(Regions) / 13756,
+      TRUE                           ~ NA_real_
+    )
+  )
+
+sites <- sites %>%
+  mutate(Category = if_else(
+    !grepl("^(island|shore|opensea)", Category, ignore.case = TRUE),
+    paste0("all_", Category),                                       
+    Category                                                       
+  ))
+
+all_pst_sites <- left_join(all_pst, sites, by = c("Annotation" = "Category"))
+
+```
+
+
+Plot these correlation by region for the figure
+
+```{r}
+#Create correlation based on unique values of Annotation column
+correlation_df <- all_pst_sites %>%
+  group_by(Annotation) %>%
+  summarise(
+    Spearman_Rho = cor.test(Mean, avg_fst, method = "spearman")$estimate,
+    P_value = cor.test(Mean, avg_fst, method = "spearman")$p.value
+  ) %>%
+  ungroup()
+
+
+correlation_df <- left_join(correlation_df, sites, by = c("Annotation" = "Category"))
+correlation_df <- correlation_df %>% filter(!grepl("opensea",Annotation))
+
+correlation_df <- correlation_df %>%
+ mutate(no.sites = coalesce(prop.sites, 0) + coalesce(prop.regions, 0))
+
+#Transform the new dataframe for plotting (aka ren-name for figures)
+correlation_df <- correlation_df %>%
+  # Separate Annotation into 'island' and 'region'
+  separate(Annotation, into = c("island", "region"), sep = "_") %>%
+  # Rename the 'island' column values
+  mutate(
+    island = case_when(
+      island == "island" ~ "CpG island",
+      island == "shore" ~ "CpG flanks",
+      island == "all" ~ "CpG sites",
+      TRUE ~ island # Keep other values as they are if they exist
+    )
+  ) %>%
+  # Now rename and reorder the 'region' column values
+  mutate(
+    region = case_when(
+      region == "intron" ~ "Intron",
+      region == "exon" ~ "Exon",
+      region == "promoter-TSS" ~ "Promoter",
+      TRUE ~ region # Keep other values as they are if they exist
+    )
+  ) %>%
+  # Convert to factor with the new, desired levels
+  mutate(
+    island = factor(island, levels = c("CpG island", "CpG flanks", "CpG sites")),
+    region = factor(region, levels = c("Intergenic", "Promoter", "Intron", "Exon", "TTS"))
+  )
+
+correlation_df <- correlation_df %>%
+  mutate(num.sites = if_else(island == "CpG sites", 
+                             Sites, 
+                             as.numeric(Regions)))
+
+# color palette 
+color_island <- c(
+  "CpG island" = "darkorange3",
+  "All CpG sites" = "lightblue",
+  "flanks" = "darkorange2"
+)
+
+color_region <- c(
+  "Intergenic" = wes_palette("Darjeeling1", n = 4, type = "discrete")[1],
+  "Promoter" = wes_palette("Darjeeling1", n = 4, type = "discrete")[2],
+  "Intron" = wes_palette("Darjeeling1", n = 4, type = "discrete")[3],
+  "Exon" = wes_palette("Darjeeling1", n = 4, type = "discrete")[4],
+  "TTS" = wes_palette("Darjeeling1", n = 5, type = "discrete")[5]
+)
+
+#Plot the correlations by island
+island.plot <- ggplot(correlation_df, aes(x = island, y = Spearman_Rho, fill = island)) +
+  geom_boxplot() +
+  scale_fill_manual(values = color_island) +
+  labs(
+    y = "Rho (ρ)",
+    fill = "Correlation Group" # Legend title
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text = element_text(size = 10),
+    axis.title.y = element_text(size = 12),
+    axis.title.x = element_blank(), # Remove the x-axis title
+    legend.position = "none" # Remove the legend
+  )
+
+island.plot
+
+island.plot.size <- ggplot(correlation_df, aes(x = island, y = Spearman_Rho)) +
+  geom_point(aes(size = no.sites, fill = region), shape = 21, color = "black", alpha = 0.7) +
+  scale_fill_manual(name = "Region", values = color_region) +
+  scale_size_continuous(name = "Prop. of sites", range = c(4, 12)) +
+  labs(
+    y = "Rho (ρ)",
+    x = NULL
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text = element_text(size = 10),
+    axis.text.x = element_text(angle = 45, hjust = 1),  # rotate x-axis labels
+    axis.title.y = element_text(size = 12),
+    legend.position = "right"
+  )
+
+
+island.plot.size
+
+#Plot the correlations by region
+region.plot <- ggplot(correlation_df, aes(x = region, y = Spearman_Rho, fill = region)) +
+  geom_boxplot() +
+  scale_fill_manual(values = color_region) +
+  labs(
+    y = "Rho (ρ)",
+    fill = "Correlation Group" # Legend title
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    axis.title.x = element_blank(), # Remove the x-axis title
+    legend.position = "none" # Remove the legend
+  )
+
+region.plot
+
+region.plot.size <- ggplot(correlation_df, aes(x = region, y = Spearman_Rho)) +
+  geom_point(aes(size = no.sites, fill = island), shape = 21, color = "black", alpha = 0.7) +
+  scale_fill_manual(values = color_island) +
+ scale_size_continuous(name = "No. sites", range = c(4, 12)) +  # adjust
+  labs(
+    y = "Rho (ρ)",
+    x = NULL
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text = element_text(size = 10),
+    axis.title.y = element_text(size = 12),
+    legend.position = "right"   # keep legend for dot size and island colors
+  )
+
+region.plot.size
+```
+
+
+Save Images
+
+```{r}
+ggsave("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST_FST_gw/Figure1g.PST.FST.islands.png", plot = island.plot.size, width = 4, height = 4, units = "in", dpi = 500)
+
+ggsave("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST_FST_gw/SuppFig.PST.FST.regions.png", plot = region.plot.size, width = 5, height = 4, units = "in", dpi = 500)
+```
+

@@ -1,0 +1,411 @@
+---
+title: "PST_results_exploration"
+author: "Sarah Mueller"
+date: "2023-07-06"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+### Libraries
+.libPaths(c(.libPaths(),"/dss/dsshome1/lxc0B/ra52qed/R/x86_64-pc-linux-gnu-library/4.2"))
+
+library(vegan)
+library(ggplot2, lib = "/dss/dsshome1/lxc0B/ra52qed/R/x86_64-pc-linux-gnu-library/4.2")
+library(plyr)
+library(broom)
+library(readxl)
+library(cluster)
+library(ape)
+library(languageR)
+library(packfor)
+library(ggrepel)
+library(knitr)
+library(ggvenn)
+library(ggbreak)
+library(gridExtra)
+library(tidyr)
+library(dplyr)
+
+setwd("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/0_cpgi")
+
+```
+
+## PST Results in CpG islands 
+
+Now I want to replicate this but look across CpG islands
+```{r message=FALSE, warning=FALSE}
+#######Data Preparation#####
+
+#load in just one population comparison first
+pst.cpgi <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/0_cpgi_pst/0_pst_cpgi_c05.txt", header=T)
+
+#sample names
+sample_names <- read.table("/dss/dsshome1/lxc0B/ra52qed/gitlab/swallow.projects/scripts/0_sample.lists/sample.names.85.txt")
+#add sample pops
+sample_names <- sample_names %>%
+  mutate(pop = case_when(
+  grepl("RU_13_R_", V1) ~ "rustica.r",
+  grepl("CH_", V1) ~ "rustica.eu",
+  grepl("DE_", V1) ~ "rustica.eu",
+  grepl("FI", V1) ~ "rustica.eu",
+  grepl("_G_", V1) ~ "gutturalis",
+  grepl("_E_", V1) ~ "erythrogaster",
+  grepl("_S_", V1) ~ "savignii",
+  grepl("_TV_", V1) ~ "transitiva",
+  grepl("_T_", V1) ~ "tytleri"))
+#add pop combinations
+pop.list <- as.data.frame(unique(as.vector(sample_names$pop)))
+colnames(pop.list) <- c("pop1")
+pop.combo <- tidyr::crossing(var1=pop.list$pop1, var2=pop.list$pop1)
+pop.combo <- pop.combo[c(2:7, 10:14, 18:21,26:28, 34:35,42),]
+
+#get explanatory variables set
+info <- read_xlsx("/dss/dsshome1/lxc0B/ra52qed/gitlab/swallow.projects/scripts/0_sample.lists/NCBI_info_updated_20220727.xlsx")
+
+#remove all individuals not used for this analysis
+info=info %>%
+  dplyr::slice(match(sample_names$V1, info$sample_name))
+
+##keep only top 1% of sites
+pst.quantiles <- pst.cpgi %>%
+  replace(is.na(.), 0) %>%
+  gather(pop.combo, pst.value, -site.id) %>%
+  group_by(pop.combo) %>%
+  mutate(q99 = quantile(pst.value, 0.99), row = row_number()) %>%
+  filter(pst.value >= q99) %>%
+  dplyr::select(-q99) %>%
+  spread(pop.combo, pst.value) %>%
+  dplyr::select(-row) 
+
+for(i in 1:nrow(pop.combo)) {
+  row <- pop.combo[i,]
+
+# Define populations to analyse
+Pop1<- row$var1
+Pop2<- row$var2
+Pops <- paste0(row$var1, ".vs.", row$var2, ".pst")
+Output_vector<- paste0("top1.", row$var1, ".vs.", row$var2)
+
+assign(Output_vector, pst.quantiles %>% drop_na(Pops) %>% dplyr::pull(site.id))
+
+}
+
+pst.list <- list(erythrogaster.vs.gutturalis = top1.erythrogaster.vs.gutturalis,
+                 erythrogaster.vs.rustica = top1.erythrogaster.vs.rustica.r,
+                 erythrogaster.vs.rustica.eu = top1.erythrogaster.vs.rustica.eu,
+                 erythrogaster.vs.savignii = top1.erythrogaster.vs.savignii,
+                 erythrogaster.vs.transitiva = top1.erythrogaster.vs.transitiva,
+                 erythrogaster.vs.tytleri = top1.erythrogaster.vs.tytleri,
+                 gutturalis.vs.rustica.r = top1.gutturalis.vs.rustica.r,
+                 gutturalis.vs.rustica.eu = top1.gutturalis.vs.rustica.eu,
+                 gutturalis.vs.savignii = top1.gutturalis.vs.savignii,
+                 gutturalis.vs.transitiva = top1.gutturalis.vs.transitiva,
+                 gutturalis.vs.tytleri = top1.gutturalis.vs.tytleri,
+                 rustica.eu.vs.savignii = top1.rustica.eu.vs.savignii,
+                 rustica.eu.vs.transitiva = top1.rustica.eu.vs.transitiva,
+                 rustica.eu.vs.tytleri = top1.rustica.eu.vs.tytleri,
+                 rustica.eu.vs.rustica.r = top1.rustica.eu.vs.rustica.r,
+                 rustica.r.vs.savignii = top1.rustica.r.vs.savignii,
+                 rustica.r.vs.transitiva = top1.rustica.r.vs.transitiva,
+                 rustica.r.vs.tytleri = top1.rustica.r.vs.tytleri,
+                 savignii.vs.transitiva = top1.savignii.vs.transitiva,
+                 savignii.vs.tytleri = top1.savignii.vs.tytleri,
+                 transitiva.vs.tytleri = top1.transitiva.vs.tytleri)
+
+  
+#venn diagram of overlappign sites
+
+#residential population comparison
+v1 <- ggvenn(pst.list, c("savignii.vs.transitiva" , "savignii.vs.tytleri", "transitiva.vs.tytleri"),
+  fill_color = c("#0073C2FF", "#EFC000FF", "#868686FF", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4)
+v1
+
+#comparison to erythro
+v3 <- ggvenn(pst.list, c("erythrogaster.vs.gutturalis" , "erythrogaster.vs.rustica", "erythrogaster.vs.savignii", "erythrogaster.vs.tytleri"),
+  fill_color = c("#0073C2FF", "#EFC000FF", "#868686FF", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4)
+v3
+
+#comparison of parental populations in Asia
+v3 <- ggvenn(pst.list, c("gutturalis.vs.tytleri" , "gutturalis.vs.rustica.r", "rustica.r.vs.tytleri"),
+  fill_color = c("#0073C2FF", "#EFC000FF", "#868686FF", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4)
+v3
+
+```
+
+Of the most diverged CPGislands, are there islands that show up in several pairwise comparisons? Would these make good candidates for further investigation?
+I removed sites which only had one value meaning they did not overlap with any other pairwise comparisons of PST
+
+```{r}
+#from the pst.quantiles, we can make for allsites and cpgisland a new data frame which shows for the top 1% of PST values, in how many pairwise comparisons was this PST value in the top 1% of PST
+cpgi.overlap <- data.frame(site.id = pst.quantiles$site.id,
+                            count = (rowSums(!is.na(pst.quantiles))-1))
+cpgi.overlap <- cpgi.overlap %>%
+                            filter(count > 1)
+cpgi.overten <- cpgi.overlap %>%
+                            filter(count > 10)
+
+print(cpgi.overten)
+
+histogram.cpgi <- ggplot(cpgi.overlap, aes(x = count)) +
+  geom_histogram(binwidth = 1, fill = "#276FBF", color = "black") +
+  labs(x = "Site Count", y = "Frequency") +
+  theme_minimal()
+histogram.cpgi
+```
+
+Whats interesting here is the 2 CpG islands on chr02 that shows up in GWAS comparisons uncderlying phenotypic traits. 
+
+#Now look at what regions these fall into
+
+```{r message= FALSE, warning=FALSE}
+#load homer input and methylation input
+homer.cpgi.20miss <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_Pre-processing/4_methyl_calling/1_CpG_islands/85.20miss/homer.cpgi.prop.85.merged.20miss.rmlowv.rmout.txt", header=T, sep="\t")
+
+
+
+```
+
+```{r message= FALSE, warning=FALSE}
+#Lets plot these aganist some information from homer to some genomic categories
+# Plot boxplots for Gene.Type
+gene_type_plot <- ggplot(homer.cpgi.20miss, aes(x = Gene.Type)) +
+  geom_bar(fill = "#0097c3", color = "grey66") +
+  labs(title = "Frequency of Sites by Gene Type", x = "Gene Type", y = "Frequency") +
+  theme_minimal()
+gene_type_plot
+# Filter data for Entrez.ID and Nearest.Unigene where frequency is above 10
+filtered_data_e <- homer.cpgi.20miss %>%
+  group_by(Entrez.ID) %>%
+  filter(n() > 10)
+print(filtered_data_e)
+# Plot histograms for Entrez.ID
+entrez_id_plot <- ggplot(homer.cpgi.20miss, aes(x = Entrez.ID)) +
+  geom_bar(fill = "#0097c3", color = "#333333")+
+  labs(title = "Frequency of Sites by Entrez ID (Frequency > 10)", x = "Entrez ID", y = "Frequency") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+entrez_id_plot
+# Filter data for Nearest.Unigene where frequency is above 10
+filtered_data <- homer.cpgi.20miss %>%
+  group_by(Nearest.Unigene) %>%
+  filter(n() > 10)
+print(filtered_data)
+# Plot histograms for Nearest.Unigene
+nearest_unigene_plot <- ggplot(homer.cpgi.20miss, aes(x = Nearest.Unigene)) +
+  geom_bar(fill = "#0097c3", color = "#333333") +
+  labs(title = "Frequency of Sites by Nearest Unigene (Frequency > 10)", x = "Nearest Unigene", y = "Frequency") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+nearest_unigene_plot
+# Plot histograms for Annotation
+annotation_plot <- ggplot(homer.cpgi.20miss, aes(x = Annotation)) +
+  geom_bar(fill = "#0097c3", color = "#333333") +
+  labs(title = "Frequency of Sites by Annotation", x = "Annotation", y = "Frequency") +
+  theme_minimal()
+annotation_plot
+# Plot histograms for Distance.to.TSS
+distance_to_tss_plot <- ggplot(homer.cpgi.20miss, aes(x = Distance.to.TSS)) +
+  geom_histogram(fill = "#0097c3", color = "#333333") +
+  labs(title = "Frequency of Sites by Distance to TSS", x = "Distance to TSS", y = "Frequency") +
+  theme_minimal()
+distance_to_tss_plot
+# Plot histograms for Distance.to.TSS...zoom
+distance_to_tss_plot_zoom <- ggplot(homer.cpgi.20miss, aes(x = Distance.to.TSS)) +
+  geom_histogram(fill = "#0097c3", color = "#333333") +
+  xlim(c(-2000, 10000))+
+  labs(title = "Frequency of Sites by Distance to TSS", x = "Distance to TSS", y = "Frequency") +
+  theme_minimal()
+distance_to_tss_plot_zoom
+
+summary(homer.cpgi.20miss$Distance.to.TSS)
+```
+Lets look at the mean methylation value across these sites per population. 
+```{r message=FALSE, warning=FALSE}
+mean_combined <- homer.cpgi.20miss %>%
+  rowwise() %>%
+  mutate(mean_G = mean(c_across(contains("_G_")), na.rm = TRUE),
+         sd_G = sd(c_across(contains("_G_")), na.rm = TRUE),
+         q25_G = quantile(c_across(contains("_G_")), na.rm = TRUE, probs = 0.25),
+         q75_G = quantile(c_across(contains("_G_")), na.rm = TRUE, probs = 0.75),
+         mean_E = mean(c_across(contains("_E_")), na.rm = TRUE),
+         sd_E = sd(c_across(contains("_E_")), na.rm = TRUE),
+         q25_E = quantile(c_across(contains("_E_")), na.rm = TRUE, probs = 0.25),
+         q75_E = quantile(c_across(contains("_E_")), na.rm = TRUE, probs = 0.75),
+         mean_S = mean(c_across(contains("_S_")), na.rm = TRUE),
+         sd_S = sd(c_across(contains("_S_")), na.rm = TRUE),
+         q25_S = quantile(c_across(contains("_S_")), na.rm = TRUE, probs = 0.25),
+         q75_S = quantile(c_across(contains("_S_")), na.rm = TRUE, probs = 0.75),
+         mean_T = mean(c_across(contains("_T_")), na.rm = TRUE),
+         sd_T = sd(c_across(contains("_T_")), na.rm = TRUE),
+         q25_T = quantile(c_across(contains("_T_")), na.rm = TRUE, probs = 0.25),
+         q75_T = quantile(c_across(contains("_T_")), na.rm = TRUE, probs = 0.75),
+         mean_TV = mean(c_across(contains("_TV_")), na.rm = TRUE),
+         sd_TV = sd(c_across(contains("_TV_")), na.rm = TRUE),
+         q25_TV = quantile(c_across(contains("_TV_")), na.rm = TRUE, probs = 0.25),
+         q75_TV = quantile(c_across(contains("_TV_")), na.rm = TRUE, probs = 0.75),
+         mean_Rr = mean(c_across(contains("_RU_13_R")), na.rm = TRUE),
+         sd_Rr = sd(c_across(contains("_RU_13_R_")), na.rm = TRUE),
+         q25_Rr = quantile(c_across(contains("_RU_13_R_")), na.rm = TRUE, probs = 0.25),
+         q75_Rr = quantile(c_across(contains("_RU_13_R_")), na.rm = TRUE, probs = 0.75),
+         mean_Reu = mean(c_across(matches("_CH_|_DE_|_FI_")), na.rm = TRUE),
+         sd_Reu = sd(c_across(matches("_CH_|_DE_|_FI_")), na.rm = TRUE),
+         q25_Reu = quantile(c_across(matches("_CH_|_DE_|_FI_")), na.rm = TRUE, probs = 0.25),
+         q75_Reu = quantile(c_across(matches("_CH_|_DE_|_FI_")), na.rm = TRUE, probs = 0.75)) %>%
+  dplyr::select(site.id, mean_G, sd_G, q25_G, q75_G, mean_E, sd_E, q25_E, q75_E, mean_S, sd_S, q25_S, q75_S, mean_T, sd_T, q25_T, q75_T, mean_TV, sd_TV, q25_TV, q75_TV, mean_Rr, sd_Rr, q25_Rr, q75_Rr, mean_Reu, sd_Reu, q25_Reu, q75_Reu)
+
+#reformat for plotting
+mean_combined_long <- mean_combined %>%
+  pivot_longer(cols = starts_with(c("mean_", "q", "sd")), 
+               names_to = c(".value", "Population"), 
+               names_sep = "_")
+
+# Define color palette
+pal <- c( "#CBC3E3", "#6294b7", "#aa0a0f", "#fa8072", "#A0825A", "#FFEF00", "grey")
+
+chr31 <- mean_combined_long %>%
+  filter(grepl("chr31", site.id)) 
+chr11 <- mean_combined_long %>%
+  filter(grepl("chr11", site.id)) 
+chr01a <- mean_combined_long %>%
+  filter(grepl("chr01A", site.id)) 
+chr05 <- mean_combined_long %>%
+  filter(grepl("chr05", site.id)) 
+
+# Create boxplot for each unique site.id for a few chromosomes
+c01a <- ggplot(chr01a, aes(x = Population, y = mean, fill = Population)) +
+        geom_boxplot(aes(ymin = mean - sd ,lower = q25, middle = mean, upper = q75, ymax = mean + sd), stat = "identity") +
+        labs(x = "Population", y = "Mean Methylation", fill = "Population") +
+        theme_minimal() +
+        scale_fill_manual(values = pal) +  # Apply custom colors
+        facet_wrap(~site.id, scales = "free_x", ncol = 3)
+
+c01a
+
+c05 <- ggplot(chr05, aes(x = Population, y = mean, fill = Population)) +
+        geom_boxplot(aes(ymin = mean - sd ,lower = q25, middle = mean, upper = q75, ymax = mean + sd), stat = "identity") +
+        labs(x = "Population", y = "Mean Methylation", fill = "Population") +
+        theme_minimal() +
+        scale_fill_manual(values = pal) +  # Apply custom colors
+        facet_wrap(~site.id, scales = "free_x", ncol = 3)
+
+c05
+
+c11 <- ggplot(chr11, aes(x = Population, y = mean, fill = Population)) +
+        geom_boxplot(aes(ymin = mean - sd ,lower = q25, middle = mean, upper = q75, ymax = mean + sd), stat = "identity") +
+        labs(x = "Population", y = "Mean Methylation", fill = "Population") +
+        theme_minimal() +
+        scale_fill_manual(values = pal) +  # Apply custom colors
+        facet_wrap(~site.id, scales = "free_x", ncol = 3)
+
+c11
+
+c31 <- ggplot(chr31, aes(x = Population, y = mean, fill = Population)) +
+        geom_boxplot(aes(ymin = mean - sd ,lower = q25, middle = mean, upper = q75, ymax = mean + sd), stat = "identity") +
+        labs(x = "Population", y = "Mean Methylation", fill = "Population") +
+        theme_minimal() +
+        scale_fill_manual(values = pal) +  # Apply custom colors
+        facet_wrap(~site.id, scales = "free_x", ncol = 3)
+
+c31
+
+
+```
+
+We can also look at a volcano plot to see diff in methylation. This also is done pairwise, so forthe moment, I just want to look at the hybrid zones R-T and R-G. Also looking at the rustica comparisons to eachother, out of curiosity.
+
+```{r message=FALSE, warning=FALSE}
+##volcano plot
+#calculate difference between two groups
+mean_combined <- mean_combined %>% 
+  mutate(dRrG = mean_Rr - mean_G) %>% 
+  mutate(dRrT = mean_Rr - mean_T) %>% 
+  mutate(dGT = mean_T - mean_G) %>% 
+  mutate(dEG = mean_E - mean_G) 
+
+mean_combined <- left_join(mean_combined, pst.allsite, by="site.id")
+```
+
+```{r}
+#plot RG
+volcano_plot <- ggplot(data = mean_combined, aes(x = dRrG, y = gutturalis.vs.rustica.r.pst)) +
+  geom_point(size = 0.9) +
+  theme_minimal() + 
+  labs(x = "Difference in methylation", y = "PST values") +
+  theme(plot.title = element_text(size = 12, face = "bold", hjust = 0.5),
+        axis.title = element_text(size = 10),
+        axis.text = element_text(size = 8),
+        axis.line = element_line(color = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1))+
+  ggtitle("Volcano plot for R and G")
+
+volcano_plot
+
+#plot RT
+volcano_plot1 <- ggplot(data = mean_combined, aes(x = dRrT, y = rustica.r.vs.tytleri.pst)) +
+  geom_point(size = 0.9) +
+  theme_minimal() + 
+  labs(x = "Difference in methylation", y = "PST values") +
+  theme(plot.title = element_text(size = 12, face = "bold", hjust = 0.5),
+        axis.title = element_text(size = 10),
+        axis.text = element_text(size = 8),
+        axis.line = element_line(color = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1))+
+  ggtitle("Volcano plot for R and T")
+
+volcano_plot1
+
+#plot RrRch
+volcano_plot2 <- ggplot(data = mean_combined, aes(x = dGT, y = gutturalis.vs.tytleri.pst)) +
+  geom_point(size = 0.9) +
+  theme_minimal() + 
+  labs(x = "Difference in methylation", y = "PST values") +
+  theme(plot.title = element_text(size = 12, face = "bold", hjust = 0.5),
+        axis.title = element_text(size = 10),
+        axis.text = element_text(size = 8),
+        axis.line = element_line(color = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1))+
+  ggtitle("Volcano plot for G vs T")
+
+volcano_plot2
+
+#plot RrRde
+volcano_plot3 <- ggplot(data = mean_combined, aes(x = dEG, y = erythrogaster.vs.gutturalis.pst)) +
+  geom_point(size = 0.9) +
+  theme_minimal() + 
+  labs(x = "Difference in methylation", y = "PST values") +
+  theme(plot.title = element_text(size = 12, face = "bold", hjust = 0.5),
+        axis.title = element_text(size = 10),
+        axis.text = element_text(size = 8),
+        axis.line = element_line(color = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1))+
+  ggtitle("Volcano plot for E vs G")
+
+volcano_plot3
+
+
+```
+
+
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

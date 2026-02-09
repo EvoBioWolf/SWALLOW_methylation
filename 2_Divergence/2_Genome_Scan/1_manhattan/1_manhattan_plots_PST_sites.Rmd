@@ -1,0 +1,579 @@
+---
+title: "Manhattan Plots - PST, FST, GC content"
+author: "Sarah Mueller"
+date: "2025 - final"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+### Libraries
+.libPaths(c(.libPaths(),"/dss/dsshome1/lxc0B/ra52qed/R/x86_64-pc-linux-gnu-library/4.2"))
+
+library(vegan)
+library(plyr)
+library(broom)
+library(readxl)
+library(cluster)
+library(ape)
+library(languageR)
+library(packfor)
+library(ggrepel)
+library(knitr)
+library(ggvenn)
+#library(ggbreak)
+library(tidyr)
+library(dplyr)
+library(purrr)
+library(ggpmisc)
+library(gridExtra)
+library(ggnewscale)
+library(stringr)
+library(rlang)
+library(ggplot2, lib = "/dss/dsshome1/lxc0B/ra52qed/R/x86_64-pc-linux-gnu-library/4.2")
+```
+
+##PST vs. FST comparison
+
+Look at the genome wide comparison between FST and PST
+
+```{r message=FALSE, warning=FALSE}
+#Load and process CPGI PST data
+pst.full <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/0_window_pst/0_pst_cpgi_10kb_c05.txt", header=T)
+
+# Separate the site.id into chr and pos columns
+pst.gw <- pst.full %>%
+  separate(site.id, into = c("chr", "pos"), sep = "\\.") %>%
+  mutate(pos = as.numeric(pos))
+
+
+#Load and process Shore data
+shore.full <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/0_window_pst/0_pst_shore_10kb_c05.txt", header=T)
+
+shore.gw <- shore.full %>%
+  separate(site.id, into = c("chr", "pos"), sep = "\\.") %>%
+  mutate(pos = as.numeric(pos))
+
+#Load and process Opensea data
+opensea.full <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/0_window_pst/0_pst_opensea_10kb_c05.txt", header=T)
+
+opensea.gw <- opensea.full %>%
+  separate(site.id, into = c("chr", "pos"), sep = "\\.") %>%
+  mutate(pos = as.numeric(pos))
+
+#load FST
+fst.fd <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/5_WGS/1_Population_Structure/4_pixy/HR.168.invariant.10kb/HR.168.invariant.10kb_fst.txt", header=T)
+colnames(fst.fd) <- c("pop1", "pop2", "chr", "window_start", "window_end", "fst", "nsites")
+
+#pivot_shorter to match pst data
+fst.pw <- fst.fd %>%
+  mutate(comparison = paste(pop1, pop2, "fst", sep = ".vs.")) %>%  # Create a unique comparison column
+  select(chr, window_start, window_end, comparison, fst) %>%  # Select relevant columns
+  pivot_wider(
+    names_from = comparison,  # Create new columns from the comparison column
+    values_from = fst  # Fill values from avg_wc_fst
+  )
+
+
+#add genome information
+hr.genome <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_genome_files/0_rename_chr/chromosomes.genome")
+colnames(hr.genome) <- c("chr", "max_bp")
+hr.genome <- hr.genome %>%
+  filter(!grepl("_random|W|Z", chr))
+#update chr04, as no snps past certain value
+hr.genome <- hr.genome %>%
+  mutate(max_bp = if_else(chr == "chr04", 37234403, max_bp)) %>%
+  filter(!chr %in% c("chr15", "chr16")) %>%
+  mutate(bp_add = lag(cumsum(as.numeric(max_bp)), default = 0))
+
+  data_cum <- hr.genome %>%
+    group_by(chr) %>%
+    dplyr::summarize(max_bp = max(max_bp)) %>%
+    mutate(bp_add = lag(cumsum(as.numeric(max_bp)), default = 0))
+```
+
+I need to get the PST data into the correct format. I will use the top 1% of 10kb windows (islands, flanks, sites) to compare aganist the FST data
+
+```{r}
+process_pst_data <- function(raw_df, feature_name) {
+  # 1. Identify .pst columns
+  pst_cols <- grep("\\.pst$", names(raw_df), value = TRUE)
+  out_list <- list()
+  
+  # 2. Setup cumulative data once
+  data_cum <- hr.genome %>%
+    group_by(chr) %>%
+    dplyr::summarize(max_bp = max(max_bp)) %>%
+    mutate(bp_add = lag(cumsum(as.numeric(max_bp)), default = 0))
+  
+  for (col in pst_cols) {
+    # Process each comparison
+    df <- raw_df %>%
+      select(chr, pos, all_of(col)) %>%
+      # Standardize the PST column name using dplyr::rename
+      dplyr::rename(pst_value = all_of(col)) %>%
+      # Add cumulative positions
+      inner_join(data_cum, by = "chr") %>%
+      mutate(bp_cum = pos + bp_add) %>%
+      # Add pop info
+      mutate(pops = str_remove(col, "\\.pst")) %>%
+      separate(pops, into = c("pop1", "pop2"), sep = "\\.vs\\.", remove = FALSE)
+    
+    # Calculate top 1% threshold for THIS comparison
+    thresh <- quantile(df$pst_value, 0.99, na.rm = TRUE)
+    df <- df %>% mutate(top_pst = ifelse(pst_value >= thresh, "yes", "no"))
+    
+    out_list[[col]] <- df
+  }
+  return(out_list)
+}
+```
+
+```{r}
+cpgi_list    <- process_pst_data(pst.gw, "cpgi")
+shore_list   <- process_pst_data(shore.gw, "shore")
+opensea_list <- process_pst_data(opensea.gw, "opensea")
+```
+
+No variants on 15, so I will remove for plotting
+```{r}
+# Define a function to shift coordinates based on the new hr.genome
+update_coords <- function(df_list) {
+  lapply(df_list, function(df) {
+    df %>%
+      # 1. Remove the gap chromosomes
+      filter(!chr %in% c("chr15", "chr16")) %>%
+      # 2. Remove old coordinate columns to avoid conflicts
+      select(-any_of(c("bp_add", "bp_cum"))) %>%
+      # 3. Join with the NEW master genome (the one where you removed 15/16)
+      inner_join(hr.genome %>% select(chr, bp_add), by = "chr") %>%
+      # 4. Calculate the new shifted cumulative position
+      mutate(bp_cum = pos + bp_add)
+  })
+}
+
+cpgi_list       <- update_coords(cpgi_list)
+shore_list      <- update_coords(shore_list)
+opensea_list    <- update_coords(opensea_list)
+```
+
+##Load FST data and get into the proper format for plotting, by adding the total bp for each chromosome and reducing some data points
+
+```{r}
+fst_columns <- grep("\\.fst$", names(fst.pw), value = TRUE)
+
+# Initialize lists
+fst_list <- list()
+fst_points_list <- list()
+
+# Loop through each .fst column
+for (fst_col in fst_columns) {
+  # 1. Select and rename
+  df_fst <- fst.pw %>%
+    select(chr, window_start, window_end, !!fst_col) %>%
+    dplyr::rename(fst = !!sym(fst_col))
+  
+  # 2. Format coordinates
+  df_fst_windows <- df_fst %>%
+    inner_join(data_cum, by = "chr") %>%
+    mutate(window_start = as.numeric(window_start),
+           bp_cum = window_start + bp_add) %>%
+    filter(!is.na(fst)) %>% 
+    filter(fst >= 0) %>% 
+    select(-bp_add, -max_bp)
+  
+  # --- NEW: Calculate Top 1% Outliers per comparison ---
+  fst_threshold <- quantile(df_fst_windows$fst, 0.99, na.rm = TRUE)
+  
+  df_fst_windows <- df_fst_windows %>%
+    mutate(top_fst = ifelse(fst >= fst_threshold, "yes", "no"))
+  
+  # 3. Create reduced data for the smooth line (Manhattan background)
+  fst_reduced <- df_fst_windows %>%
+    group_by(chr) %>%
+    filter(fst > 0.2 | window_start %% 100000 == 1) %>%
+    arrange(chr, bp_cum) %>%
+    ungroup()
+
+  # 4. Filter for specific outlier points (now using the 1% flag)
+  fst_points <- df_fst_windows %>%
+    filter(top_fst == "yes")  
+
+  # Store results
+  fst_list[[fst_col]] <- fst_reduced
+  fst_points_list[[fst_col]] <- fst_points
+}
+
+# --- Cleanup Names and add Pop info ---
+# (Repeat this for both fst_list and fst_points_list)
+process_names <- function(l) {
+  original_names <- names(l)
+  l <- lapply(original_names, function(name) {
+    l[[name]] %>%
+      mutate(pops = str_remove(name, "\\.vs\\.fst")) %>%
+      separate(pops, into = c("pop1", "pop2"), sep = "\\.vs\\.") %>%
+      mutate(across(c(pop1, pop2), as.character))
+  })
+  names(l) <- original_names
+  return(l)
+}
+
+fst_list <- process_names(fst_list)
+fst_points_list <- process_names(fst_points_list)
+```
+
+FST plotting
+
+```{r, message=F, warning=FALSE}
+fst.fd <- fst.fd %>%
+    inner_join(data_cum, by = "chr") %>%
+    mutate(window_end = as.numeric(window_end),
+           bp_cum = window_end + bp_add) %>%
+   # filter(!is.na(fst)) %>% 
+   #filter(!fst<0) %>% 
+    select(-bp_add, -max_bp)  # Optionally remove the bp_add and max_bp columns
+
+axis_set <- fst.fd %>%
+    group_by(chr) %>%
+    dplyr::summarize(center = mean(bp_cum))
+
+plot_fst_manhattan <- function(data, title) {
+  # 1. Calculate axis_set using bp_cum to center labels on the continuous x-axis
+  axis_set <- data %>%
+    group_by(chr) %>%
+    dplyr::summarize(center = mean(bp_cum))
+
+  # 2. Create the plot using bp_cum for the x aesthetic
+  ggplot(data, aes(x = bp_cum, y = fst, group = chr)) +
+    # Background points for context
+    geom_point(alpha = 0.1, size = 0.5, color = "grey") + 
+    # The loess smoothing line
+    geom_smooth(aes(color = as.factor(chr)), method = "loess", se = FALSE, size = 0.5, span = 0.05) +
+    
+    # Scales
+    scale_y_continuous(limits = c(0, 1)) +
+    # Use the calculated bp_cum centers for the x-axis labels
+    scale_x_continuous(labels = axis_set$chr, breaks = axis_set$center) +
+    # Alternating colors to distinguish chromosomes
+    scale_color_manual(values = rep(c("black", "grey66"), length(unique(axis_set$chr)))) +
+    
+    labs(x = "Chromosome", y = expression(F[ST]), title = title) +
+    theme_minimal() +
+    theme(
+      legend.position = "none",
+      axis.text.x = element_text(angle = 60, size = 8, vjust = 0.5),
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor.x = element_blank(),
+      panel.background = element_blank(),
+      plot.title = element_text(hjust = 0.5)
+    )
+}
+# Apply the plotting function to each dataframe in the result_list, with titles
+plot_fst_list <- lapply(names(fst_list), function(name) {
+  plot_fst_manhattan(fst_list[[name]], title = name)
+})
+
+# Print or save the plots
+for (i in seq_along(plot_fst_list)) {
+  print(plot_fst_list[[i]])  # Or save the plot using ggsave
+}
+
+```
+
+Combine outliers
+```{r}
+# Combine all outliers into one plotting dataframe
+all_outliers <- bind_rows(
+  subset(cpgi_list$gutturalis.vs.tytleri.pst, top_pst == "yes"),
+  subset(shore_list$gutturalis.vs.tytleri.pst, top_pst == "yes"),
+  subset(opensea_list$gutturalis.vs.tytleri.pst, top_pst == "yes")
+)
+```
+
+Plotting
+```{r}
+# Define the range for the microchromosome group
+micro_chrs <- paste0("chr", 13:37)
+
+# Calculate the midpoint for the "chr13-37" label
+center_13 <- axis_set$center[axis_set$chr == "chr13"]
+center_37 <- axis_set$center[axis_set$chr == "chr37"]
+midpoint_micro <- (center_13 + center_37) / 2
+
+# Create a cleaned axis set
+axis_set_clean <- axis_set %>%
+  # Filter out chromosomes after 12 (to replace them with a single label)
+  filter(!chr %in% paste0("chr", 13:37)) %>%
+  # Add the new group label
+  add_row(chr = "chr13-37", center = midpoint_micro) %>%
+  # Ensure they are in the correct genomic order for the axis
+  arrange(center)
+
+p <- ggplot() +
+  # 1. PST Outliers (Orange)
+  geom_rect(data = all_outliers, 
+            aes(xmin = bp_cum - 200000, xmax = bp_cum + 200000, ymin = 0, ymax = 0.3),
+            fill = "#D58544", alpha = 0.3, color = NA) +
+  
+  # 2. FST Outliers (Grey)
+  geom_rect(data = subset(fst_points_list$gutturalis.vs.tytleri.vs.fst, top_fst == "yes"),
+            aes(xmin = bp_cum - 200000, xmax = bp_cum + 200000, ymin = 0, ymax = 0.3),
+            fill = "grey80", alpha = 0.1, color = NA) +
+
+  # 3. FST line
+  geom_smooth(data = fst_list$gutturalis.vs.tytleri.vs.fst, 
+              aes(x = bp_cum, y = fst, group = chr, color = as.factor(chr)), 
+              method = "loess", se = FALSE, size = 0.5, span = 0.1) + 
+  
+  # Scales and Aesthetic Updates
+  scale_color_manual(values = rep(c("black", "grey66"), 27)) +
+  scale_y_continuous(limits = c(0, 0.3)) +
+  # Use the new axis_set_clean for horizontal, sparse labels
+  scale_x_continuous(labels = axis_set_clean$chr, breaks = axis_set_clean$center) +
+  
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    # Set labels to horizontal (0 degrees)
+    axis.text.x = element_text(angle = 0, size = 9, vjust = 0.5, hjust = 0.5),
+    axis.title = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    panel.background = element_blank()
+  )
+
+p
+```
+Plotting loop
+```{r}
+# 1. Identify comparisons
+pop_comparisons <- names(cpgi_list) 
+
+plot_list <- lapply(pop_comparisons, function(comp_name) {
+  
+  # A. Setup Names
+  p1 <- cpgi_list[[comp_name]]$pop1[1]
+  p2 <- cpgi_list[[comp_name]]$pop2[1]
+  
+  fst_match <- names(fst_list)[sapply(names(fst_list), function(x) {
+    grepl(p1, x) & grepl(p2, x)
+  })]
+  
+  if (length(fst_match) == 0) {
+    message(paste("Skipping:", p1, "vs", p2, "- No matching FST data found."))
+    return(NULL)
+  }
+  
+  fst_comp_name <- fst_match[1]
+  base_title <- paste(p1, "vs", p2)
+
+  # B. Prepare Outliers (Filter out Chr15)
+  current_all_outliers <- bind_rows(
+    cpgi_list[[comp_name]],
+    shore_list[[comp_name]],
+    opensea_list[[comp_name]]
+  ) %>% filter(top_pst == "yes", chr != "chr15")
+  
+  current_fst_outliers <- fst_points_list[[fst_comp_name]] %>% 
+    filter(top_fst == "yes", chr != "chr15")
+
+  # C. Create Independent Smoothing Layers (This replaces micro_data)
+  fst_data_clean <- fst_list[[fst_comp_name]] %>% filter(chr != "chr15")
+  
+  fst_layers <- lapply(split(fst_data_clean, fst_data_clean$chr), function(chr_df) {
+    n_points <- nrow(chr_df)
+    # Determine if it's a microchromosome to use a larger span
+    is_micro <- unique(chr_df$chr) %in% paste0("chr", 13:37)
+    current_span <- if(is_micro) 0.3 else 0.1
+    
+    if(n_points > 5) {
+      geom_smooth(data = chr_df, 
+                  aes(x = bp_cum, y = fst, color = as.factor(chr)), 
+                  method = "loess", se = FALSE, size = 0.3, span = current_span)
+    } else {
+      # Fallback for very few points
+      geom_line(data = chr_df, aes(x = bp_cum, y = fst, color = as.factor(chr)), size = 0.3)
+    }
+  })
+
+  # D. Update Axis Set (Handling Chr15 and Micro grouping)
+ # 1. Define the chromosome ranges for the groups
+ group1_chrs <- c("chr09", "chr10", "chr11", "chr12", "chr13", "chr14")
+ group2_chrs <- paste0("chr", 17:37)
+
+ # 2. Calculate midpoints for these groups based on the NEW shifted centers
+ # (Using axis_set which was updated in the Master Fix)
+ midpoint_group1 <- mean(axis_set$center[axis_set$chr %in% group1_chrs], na.rm = TRUE)
+ midpoint_group2 <- mean(axis_set$center[axis_set$chr %in% group2_chrs], na.rm = TRUE)
+
+ # 3. Create the clean axis set
+ axis_set_clean <- axis_set %>%
+  # Keep the large macrochromosomes (chr01 - chr08) as individual labels
+  filter(!chr %in% c(group1_chrs, group2_chrs)) %>%
+  # Add the two new grouped labels
+  add_row(chr = "chr09-14", center = midpoint_group1) %>%
+  add_row(chr = "chr17-37", center = midpoint_group2) %>%
+  # Ensure they are in the correct genomic order
+  arrange(center)
+ axis_set_clean <- axis_set_clean %>%
+  mutate(center = if_else(chr == "chr04", center - 9000000, center))
+  
+  # E. Build Plot
+  p <- ggplot() +
+    # PST Outliers
+    geom_rect(data = current_all_outliers, 
+              aes(xmin = bp_cum - 200000, xmax = bp_cum + 200000, ymin = 0, ymax = 0.35),
+              fill = "#D58544", color = NA) +
+    
+    # FST Outliers
+    geom_rect(data = current_fst_outliers,
+              aes(xmin = bp_cum - 200000, xmax = bp_cum + 200000, ymin = 0, ymax = 0.35),
+              fill = "grey80", alpha = 0.1, color = NA) +
+
+    # Add the pre-calculated chromosome layers (This handles macro and micro)
+    fst_layers + 
+    
+    scale_color_manual(values = rep(c("black", "grey66"), 27)) +
+    scale_y_continuous(limits = c(0, 0.35), expand = c(0, 0)) +
+    scale_x_continuous(labels = axis_set_clean$chr, 
+                       breaks = axis_set_clean$center,
+                       expand = c(0, 0)) +
+    
+    labs(title = base_title) + 
+    theme_minimal() +
+    theme(
+      legend.position = "none",
+      axis.text.x = element_text(angle = 0, size = 12, vjust = 0.5),
+      axis.text.y = element_text(size = 12),
+      axis.ticks.y = element_line(),
+      axis.title = element_blank(),
+      plot.title = element_text(hjust = 0.5, face = "bold", size = 12),
+      panel.grid = element_blank(), # Cleaner look
+      panel.background = element_blank(),
+      panel.border = element_rect(colour = "grey50", fill = NA, size = 0.8)
+    )
+  
+  return(p)
+})
+
+# Final cleanup
+plot_list <- Filter(Negate(is.null), plot_list)
+```
+
+```{r}
+# Check if the list exists and has contents
+if (length(plot_list) > 0) {
+  for (i in seq_along(plot_list)) {
+    # Print the plot to the active device
+    print(plot_list[[i]])
+  }
+} else {
+  message("The plot list is empty. Check your matching logic for pop1 and pop2.")
+}
+```
+Save plots
+```{r}
+# Define the output directory
+output_dir <- "/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/2_Genome_Scan/1_manhattan/1_manhatan_plots_NEW"
+
+# Create the directory if it doesn't exist
+if (!dir.exists(output_dir)) {
+  dir.create(output_dir, recursive = TRUE)
+}
+
+# Loop through the plot_list and save each one
+for (i in seq_along(plot_list)) {
+  
+  # Extract the title from the plot to use as a filename
+  # This uses the base_title (e.g., "gutturalis vs tytleri") we created in the loop
+  plot_title <- plot_list[[i]]$labels$title
+  
+  # Clean the filename: replace spaces with underscores
+  clean_filename <- gsub(" ", "_", plot_title)
+  full_path <- file.path(output_dir, paste0("Manhattan_", clean_filename, ".png"))
+  
+  # Save the plot
+  # Units are inches by default; 15 wide by 2.5 high
+  ggsave(
+    filename = full_path,
+    plot = plot_list[[i]],
+    width = 15,
+    height = 2,
+    dpi = 300
+  )
+  
+  message(paste("Saved:", full_path))
+}
+```
+Zooms
+
+```{r}
+# Define the target populations
+p1 <- "gutturalis"
+p2 <- "rustica.eu"
+
+# Find the list names (handling potential order swaps)
+pst_name <- names(cpgi_list)[sapply(names(cpgi_list), function(x) grepl(p1, x) & grepl(p2, x))][1]
+fst_name <- names(fst_list)[sapply(names(fst_list), function(x) grepl(p1, x) & grepl(p2, x))][1]
+
+# Define the chromosomes to zoom
+target_chrs <- c("chr01A", "chr05")
+
+for (target_chr in target_chrs) {
+  
+  # Filter PST outliers for this chromosome
+  zoom_pst_outliers <- bind_rows(
+    cpgi_list[[pst_name]] %>% filter(chr == target_chr, top_pst == "yes"),
+    shore_list[[pst_name]] %>% filter(chr == target_chr, top_pst == "yes"),
+    opensea_list[[pst_name]] %>% filter(chr == target_chr, top_pst == "yes")
+  )
+  
+  # Filter FST data and outliers for this chromosome
+  zoom_fst_data <- fst_list[[fst_name]] %>% filter(chr == target_chr)
+  zoom_fst_outliers <- fst_points_list[[fst_name]] %>% filter(chr == target_chr, top_fst == "yes")
+
+  # Create Plot
+  p_zoom <- ggplot() +
+    # PST Outliers (using pos instead of bp_cum)
+    geom_rect(data = zoom_pst_outliers, 
+              aes(xmin = pos - 100000, xmax = pos + 100000, ymin = 0, ymax = 0.3),
+              fill = "#D58544", color = NA) +
+    
+    # FST Outliers
+    geom_rect(data = zoom_fst_outliers,
+              aes(xmin = window_start - 100000, xmax = window_start + 100000, ymin = 0, ymax = 0.3),
+              fill = "grey80", alpha = 0.1, color = NA) +
+
+    # FST Smooth Line (full data for this chromosome for better peaks)
+    geom_smooth(data = zoom_fst_data, 
+                aes(x = window_start, y = fst), 
+                color = "black", method = "loess", se = FALSE, size = 0.3, span = 0.1) + 
+    
+    # Formatting
+    scale_y_continuous(limits = c(0, 0.3), expand = c(0, 0)) +
+    # Use position in MB for easier reading on the zoom
+    scale_x_continuous(expand = c(0, 0), labels = function(x) paste0(x / 1e6, "Mb")) +
+    
+    labs(title = paste(p1, "vs", p2, "| Zoom:", target_chr), x = "Position") + 
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(size = 10),
+      axis.title.y = element_blank(),
+      plot.title = element_text(hjust = 0.5, face = "bold", size = 12),
+      panel.grid.minor = element_blank(),
+      panel.border = element_rect(colour = "grey50", fill = NA, size = 0.8)
+    )
+
+  # Save the zoom
+  ggsave(
+    filename = file.path(output_dir, paste0("Zoom_", target_chr, "_", p1, "_vs_", p2, ".png")),
+    plot = p_zoom,
+    width = 6,
+    height = 2,
+    dpi = 300
+  )
+  
+  print(p_zoom)
+}
+```
+

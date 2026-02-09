@@ -1,0 +1,1333 @@
+---
+title: "Untitled"
+author: "Sarah Mueller"
+date: "2024-02-12"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+### Libraries
+.libPaths(c(.libPaths(),"/dss/dsshome1/lxc0B/ra52qed/R/x86_64-pc-linux-gnu-library/4.2"))
+
+library(vegan)
+library(plyr)
+library(broom)
+library(readxl)
+library(cluster)
+library(ape)
+library(languageR)
+library(packfor)
+library(ggrepel)
+library(knitr)
+library(ggvenn)
+library(ggbreak)
+library(tidyr)
+library(ggpubr)
+library(dplyr)
+library(purrr)
+library(ggpmisc)
+library(gridExtra)
+library(stringr)
+library(ggplot2, lib = "/dss/dsshome1/lxc0B/ra52qed/R/x86_64-pc-linux-gnu-library/4.2")
+
+```
+
+##PST vs. FST comparison
+
+Fixed differences between TV and E,which are the 'most diverged' of the subspecies. My thought was to use these fixed differences, and compare what they look like across all populations from the FST and plot against the PST of +/- 100 bp 
+
+```{r message=FALSE, warning=FALSE}
+#load PST data
+pst.cpgi.1 <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/0_window/0_pst_cpgi_1kb_window_c1.txt", header=T)
+# Separate the site.id into chr and pos columns
+pst.cpgi.1 <- pst.cpgi.1 %>%
+  separate(site.id, into = c("chr", "pos"), sep = "\\.") %>%
+  mutate(pos = as.numeric(pos))
+#chr04 maps too long, remove these sites
+pst.cpgi.1 <- pst.cpgi.1 %>%
+  filter(!(chr == "chr04" & pos >= 37234403 & pos <= 73257096))%>%
+  filter(!(chr == "chr15"))
+
+#load PST data
+pst.cpgi.2 <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/0_window/0_pst_cpgi_2kb_window_c1.txt", header=T)
+# Separate the site.id into chr and pos columns
+pst.cpgi.2 <- pst.cpgi.2 %>%
+  separate(site.id, into = c("chr", "pos"), sep = "\\.") %>%
+  mutate(pos = as.numeric(pos))
+#chr04 maps too long, remove these sites
+pst.cpgi.2 <- pst.cpgi.2 %>%
+  filter(!(chr == "chr04" & pos >= 37234403 & pos <= 73257096))%>%
+  filter(!(chr == "chr15"))
+
+#load PST data
+pst.cpgi.5 <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/0_window/0_pst_cpgi_5kb_window_c1.txt", header=T)
+# Separate the site.id into chr and pos columns
+pst.cpgi.5 <- pst.cpgi.5 %>%
+  separate(site.id, into = c("chr", "pos"), sep = "\\.") %>%
+  mutate(pos = as.numeric(pos))
+#chr04 maps too long, remove these sites
+pst.cpgi.5 <- pst.cpgi.5 %>%
+  filter(!(chr == "chr04" & pos >= 37234403 & pos <= 73257096))%>%
+  filter(!(chr == "chr15"))
+
+#load PST data
+pst.cpgi.10 <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/0_window/0_pst_cpgi_10kb_window_c1.txt", header=T)
+# Separate the site.id into chr and pos columns
+pst.cpgi.10 <- pst.cpgi.10 %>%
+  separate(site.id, into = c("chr", "pos"), sep = "\\.") %>%
+  mutate(pos = as.numeric(pos))
+#chr04 maps too long, remove these sites
+pst.cpgi.10 <- pst.cpgi.10 %>%
+  filter(!(chr == "chr04" & pos >= 37234403 & pos <= 73257096))%>%
+  filter(!(chr == "chr15"))
+
+#load PST data
+pst.opensea.1 <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/0_window/0_pst_opensea_1kb_window_c1.txt", header=T)
+# Separate the site.id into chr and pos columns
+pst.opensea.1 <- pst.opensea.1 %>%
+  separate(site.id, into = c("chr", "pos"), sep = "\\.") %>%
+  mutate(pos = as.numeric(pos))
+pst.opensea.1 <- pst.opensea.1 %>%
+  filter(!(chr == "chr04" & pos >= 37234403 & pos <= 73257096)) %>%
+  filter(!(chr == "chr15"))
+
+#load PST data
+pst.opensea.2 <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/0_window/0_pst_opensea_2kb_window_c1.txt", header=T)
+# Separate the site.id into chr and pos columns
+pst.opensea.2 <- pst.opensea.2 %>%
+  separate(site.id, into = c("chr", "pos"), sep = "\\.") %>%
+  mutate(pos = as.numeric(pos))
+pst.opensea.2 <- pst.opensea.2 %>%
+  filter(!(chr == "chr04" & pos >= 37234403 & pos <= 73257096)) %>%
+  filter(!(chr == "chr15"))
+
+#load PST data
+  pst.opensea.5 <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/0_window/0_pst_opensea_5kb_window_c1.txt", header=T)
+# Separate the site.id into chr and pos columns
+pst.opensea.5 <- pst.opensea.5 %>%
+  separate(site.id, into = c("chr", "pos"), sep = "\\.") %>%
+  mutate(pos = as.numeric(pos))
+pst.opensea.5 <- pst.opensea.5 %>%
+  filter(!(chr == "chr04" & pos >= 37234403 & pos <= 73257096)) %>%
+  filter(!(chr == "chr15"))
+
+#load PST data
+pst.opensea.10 <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/0_window/0_pst_opensea_10kb_window_c1.txt", header=T)
+# Separate the site.id into chr and pos columns
+pst.opensea.10 <- pst.opensea.10 %>%
+  separate(site.id, into = c("chr", "pos"), sep = "\\.") %>%
+  mutate(pos = as.numeric(pos))
+pst.opensea.10 <- pst.opensea.10 %>%
+  filter(!(chr == "chr04" & pos >= 37234403 & pos <= 73257096)) %>%
+  filter(!(chr == "chr15"))
+
+#load FST
+fst.fd <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowWGS_168/1_Population_Structure/4_pixy/HR.168.invariant.10kb/HR.168.invariant.10kb_fst.txt", header=T)
+colnames(fst.fd) <- c("pop1", "pop2", "chr", "window_start", "window_end", "fst", "nsites")
+
+#pivot_shorter to match pst data
+fst.pw <- fst.fd %>%
+  mutate(comparison = paste(pop1, pop2, "fst", sep = ".vs.")) %>%  # Create a unique comparison column
+  select(chr, window_start, window_end, comparison, fst) %>%  # Select relevant columns
+  pivot_wider(
+    names_from = comparison,  # Create new columns from the comparison column
+    values_from = fst  # Fill values from avg_wc_fst
+  )
+
+fst.pw <- fst.pw %>%
+  rename("erythrogaster.vs.gutturalis.vs.fst" = "gutturalis.vs.erythrogaster.vs.fst") %>%
+  rename("erythrogaster.vs.rustica.eu.vs.fst" = "rustica.eu.vs.erythrogaster.vs.fst") %>%
+  rename("gutturalis.vs.rustica.eu.vs.fst" = "rustica.eu.vs.gutturalis.vs.fst") %>%
+  rename("rustica.r.vs.savignii.vs.fst" = "savignii.vs.rustica.r.vs.fst") %>%
+  rename("rustica.r.vs.transitiva.vs.fst" = "transitiva.vs.rustica.r.vs.fst")
+
+#add genome information
+hr.genome <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_genome_files/0_rename_chr/chromosomes.genome")
+colnames(hr.genome) <- c("chr", "max_bp")
+hr.genome <- hr.genome %>%
+  filter(!grepl("_random|W|Z", chr))
+#update chr04, as no snps past certain value
+hr.genome <- hr.genome %>%
+  mutate(max_bp = if_else(chr == "chr04", 37234403, max_bp))%>%
+  mutate(max_bp = if_else(chr == "chr15", 0, max_bp))
+
+```
+
+Put PST values into a list format
+```{r, message=FALSE, warning=FALSE}
+# Get the list of all `.pst` columns
+pst_columns <- grep("\\.pst$", names(pst.cpgi.1), value = TRUE)
+
+# Initialize an empty list to store the resulting dataframes
+cpgi_1kb_list <- list()
+
+# Loop through each `.pst` column
+for (pst_col in pst_columns) {
+  # Create a new dataframe with chr, pos, and the current pst column
+  df_pst <- pst.cpgi.1 %>%
+    select(chr, pos, !!pst_col)
+  
+  # Store the result in the list with the name of the pst column
+  cpgi_1kb_list[[pst_col]] <- df_pst
+}
+
+original_names <- names(cpgi_1kb_list)
+
+cpgi_1kb_list <- lapply(names(cpgi_1kb_list), function(name) {
+  cpgi_1kb_list[[name]] %>%
+    mutate(pops = name)  %>%
+    mutate(pops = str_remove(pops, ".pst")) %>%
+    # Split the 'pops' column into 'pop1' and 'pop2' by '.vs.'
+    separate(pops, into = c("pop1", "pop2"), sep = "\\.vs\\.") %>%
+    # Optionally, ensure that 'pop1' and 'pop2' are factors or characters, if needed
+    mutate(across(c(pop1, pop2), as.character))  # You can adjust this as needed
+})# Add 'pops' column with the dataframe name
+
+# Ensure the names are preserved
+names(cpgi_1kb_list) <- original_names
+
+#Loop through the list and add bp_cum for plotting
+for (name in names(cpgi_1kb_list)) {
+  # Get the dataframe
+  df <- cpgi_1kb_list[[name]]
+  
+  #Rename the pst column for plotting
+  pst_col_names <- grep("\\.pst$", names(df), value = TRUE)
+  if (length(pst_col_names) > 0) {
+    df <- df %>% rename(cpgi.pst.1kb = all_of(pst_col_names))
+  }
+  # Step 1: Calculate cumulative bp_add from the hr.genome track (necessary to have fst and pst on the same x-axis scale)
+  data_cum <- hr.genome %>%
+    group_by(chr) %>%
+    dplyr::summarize(max_bp = max(max_bp)) %>%
+    mutate(bp_add = lag(cumsum(max_bp), default = 0))
+  
+  # Convert bp_add to numeric
+  data_cum$bp_add <- as.numeric(data_cum$bp_add)
+  
+  # Step 2: Join with the original dataframe and calculate bp_cum
+  df <- df %>%
+    inner_join(data_cum, by = "chr") %>%
+    mutate(window_center = as.numeric(pos + 5000),
+           bp_cum = window_center + bp_add)
+  
+  # Step 3: Save the updated dataframe back into the list
+  cpgi_1kb_list[[name]] <- df
+}
+
+```
+
+CpGisland 2kb
+```{r, message=FALSE, warning=FALSE}
+# Get the list of all `.pst` columns
+pst_columns <- grep("\\.pst$", names(pst.cpgi.2), value = TRUE)
+
+# Initialize an empty list to store the resulting dataframes
+cpgi_2kb_list <- list()
+
+# Loop through each `.pst` column
+for (pst_col in pst_columns) {
+  # Create a new dataframe with chr, pos, and the current pst column
+  df_pst <- pst.cpgi.2 %>%
+    select(chr, pos, !!pst_col)
+  
+  # Store the result in the list with the name of the pst column
+  cpgi_2kb_list[[pst_col]] <- df_pst
+}
+
+original_names <- names(cpgi_2kb_list)
+
+cpgi_2kb_list <- lapply(names(cpgi_2kb_list), function(name) {
+  cpgi_2kb_list[[name]] %>%
+    mutate(pops = name)  %>%
+    mutate(pops = str_remove(pops, ".pst")) %>%
+    # Split the 'pops' column into 'pop1' and 'pop2' by '.vs.'
+    separate(pops, into = c("pop1", "pop2"), sep = "\\.vs\\.") %>%
+    # Optionally, ensure that 'pop1' and 'pop2' are factors or characters, if needed
+    mutate(across(c(pop1, pop2), as.character))  # You can adjust this as needed
+})# Add 'pops' column with the dataframe name
+
+# Ensure the names are preserved
+names(cpgi_2kb_list) <- original_names
+
+#Loop through the list and add bp_cum for plotting
+for (name in names(cpgi_2kb_list)) {
+  # Get the dataframe
+  df <- cpgi_2kb_list[[name]]
+  
+  #Rename the pst column for plotting
+  pst_col_names <- grep("\\.pst$", names(df), value = TRUE)
+  if (length(pst_col_names) > 0) {
+    df <- df %>% rename(cpgi.pst.2kb = all_of(pst_col_names))
+  }
+  # Step 1: Calculate cumulative bp_add from the hr.genome track (necessary to have fst and pst on the same x-axis scale)
+  data_cum <- hr.genome %>%
+    group_by(chr) %>%
+    dplyr::summarize(max_bp = max(max_bp)) %>%
+    mutate(bp_add = lag(cumsum(max_bp), default = 0))
+  
+  # Convert bp_add to numeric
+  data_cum$bp_add <- as.numeric(data_cum$bp_add)
+  
+  # Step 2: Join with the original dataframe and calculate bp_cum
+  df <- df %>%
+    inner_join(data_cum, by = "chr") %>%
+    mutate(window_center = as.numeric(pos + 5000),
+           bp_cum = window_center + bp_add)
+  
+  # Step 3: Save the updated dataframe back into the list
+  cpgi_2kb_list[[name]] <- df
+}
+
+```
+
+CpGisland 5kb
+```{r, message=FALSE, warning=FALSE}
+# Get the list of all `.pst` columns
+pst_columns <- grep("\\.pst$", names(pst.cpgi.5), value = TRUE)
+
+# Initialize an empty list to store the resulting dataframes
+cpgi_5kb_list <- list()
+
+# Loop through each `.pst` column
+for (pst_col in pst_columns) {
+  # Create a new dataframe with chr, pos, and the current pst column
+  df_pst <- pst.cpgi.5 %>%
+    select(chr, pos, !!pst_col)
+  
+  # Store the result in the list with the name of the pst column
+  cpgi_5kb_list[[pst_col]] <- df_pst
+}
+
+original_names <- names(cpgi_5kb_list)
+
+cpgi_5kb_list <- lapply(names(cpgi_5kb_list), function(name) {
+  cpgi_5kb_list[[name]] %>%
+    mutate(pops = name)  %>%
+    mutate(pops = str_remove(pops, ".pst")) %>%
+    # Split the 'pops' column into 'pop1' and 'pop2' by '.vs.'
+    separate(pops, into = c("pop1", "pop2"), sep = "\\.vs\\.") %>%
+    # Optionally, ensure that 'pop1' and 'pop2' are factors or characters, if needed
+    mutate(across(c(pop1, pop2), as.character))  # You can adjust this as needed
+})# Add 'pops' column with the dataframe name
+
+# Ensure the names are preserved
+names(cpgi_5kb_list) <- original_names
+
+#Loop through the list and add bp_cum for plotting
+for (name in names(cpgi_5kb_list)) {
+  # Get the dataframe
+  df <- cpgi_5kb_list[[name]]
+  
+  #Rename the pst column for plotting
+  pst_col_names <- grep("\\.pst$", names(df), value = TRUE)
+  if (length(pst_col_names) > 0) {
+    df <- df %>% rename(cpgi.pst.5kb = all_of(pst_col_names))
+  }
+  # Step 1: Calculate cumulative bp_add from the hr.genome track (necessary to have fst and pst on the same x-axis scale)
+  data_cum <- hr.genome %>%
+    group_by(chr) %>%
+    dplyr::summarize(max_bp = max(max_bp)) %>%
+    mutate(bp_add = lag(cumsum(max_bp), default = 0))
+  
+  # Convert bp_add to numeric
+  data_cum$bp_add <- as.numeric(data_cum$bp_add)
+  
+  # Step 2: Join with the original dataframe and calculate bp_cum
+  df <- df %>%
+    inner_join(data_cum, by = "chr") %>%
+    mutate(window_center = as.numeric(pos + 5000),
+           bp_cum = window_center + bp_add)
+  
+  # Step 3: Save the updated dataframe back into the list
+  cpgi_5kb_list[[name]] <- df
+}
+
+```
+
+CpGisland 10kb
+```{r, message=FALSE, warning=FALSE}
+# Get the list of all `.pst` columns
+pst_columns <- grep("\\.pst$", names(pst.cpgi.10), value = TRUE)
+
+# Initialize an empty list to store the resulting dataframes
+cpgi_10kb_list <- list()
+
+# Loop through each `.pst` column
+for (pst_col in pst_columns) {
+  # Create a new dataframe with chr, pos, and the current pst column
+  df_pst <- pst.cpgi.10 %>%
+    select(chr, pos, !!pst_col)
+  
+  # Store the result in the list with the name of the pst column
+  cpgi_10kb_list[[pst_col]] <- df_pst
+}
+
+original_names <- names(cpgi_10kb_list)
+
+cpgi_10kb_list <- lapply(names(cpgi_10kb_list), function(name) {
+  cpgi_10kb_list[[name]] %>%
+    mutate(pops = name)  %>%
+    mutate(pops = str_remove(pops, ".pst")) %>%
+    # Split the 'pops' column into 'pop1' and 'pop2' by '.vs.'
+    separate(pops, into = c("pop1", "pop2"), sep = "\\.vs\\.") %>%
+    # Optionally, ensure that 'pop1' and 'pop2' are factors or characters, if needed
+    mutate(across(c(pop1, pop2), as.character))  # You can adjust this as needed
+})# Add 'pops' column with the dataframe name
+
+# Ensure the names are preserved
+names(cpgi_10kb_list) <- original_names
+
+#Loop through the list and add bp_cum for plotting
+for (name in names(cpgi_10kb_list)) {
+  # Get the dataframe
+  df <- cpgi_10kb_list[[name]]
+  
+  #Rename the pst column for plotting
+  pst_col_names <- grep("\\.pst$", names(df), value = TRUE)
+  if (length(pst_col_names) > 0) {
+    df <- df %>% rename(cpgi.pst.10kb = all_of(pst_col_names))
+  }
+  # Step 1: Calculate cumulative bp_add from the hr.genome track (necessary to have fst and pst on the same x-axis scale)
+  data_cum <- hr.genome %>%
+    group_by(chr) %>%
+    dplyr::summarize(max_bp = max(max_bp)) %>%
+    mutate(bp_add = lag(cumsum(max_bp), default = 0))
+  
+  # Convert bp_add to numeric
+  data_cum$bp_add <- as.numeric(data_cum$bp_add)
+  
+  # Step 2: Join with the original dataframe and calculate bp_cum
+  df <- df %>%
+    inner_join(data_cum, by = "chr") %>%
+    mutate(window_center = as.numeric(pos + 5000),
+           bp_cum = window_center + bp_add)
+  E, T, A, O, I, N, S, R, H, and L
+  # Step 3: Save the updated dataframe back into the list
+  cpgi_10kb_list[[name]] <- df
+}
+
+```
+
+Opensea 1kb
+```{r, message=FALSE, warning=FALSE}
+# Get the list of all `.pst` columns
+pst_columns <- grep("\\.pst$", names(pst.opensea.1), value = TRUE)
+
+# Initialize an empty list to store the resulting dataframes
+opensea_1kb_list <- list()
+
+# Loop through each `.pst` column
+for (pst_col in pst_columns) {
+  # Create a new dataframe with chr, pos, and the current pst column
+  df_pst <- pst.opensea.1 %>%
+    select(chr, pos, !!pst_col)
+  
+  # Store the result in the list with the name of the pst column
+  opensea_1kb_list[[pst_col]] <- df_pst
+}
+
+original_names <- names(opensea_1kb_list)
+
+opensea_1kb_list <- lapply(names(opensea_1kb_list), function(name) {
+  opensea_1kb_list[[name]] %>%
+    mutate(pops = name)  %>%
+    mutate(pops = str_remove(pops, ".pst")) %>%
+    # Split the 'pops' column into 'pop1' and 'pop2' by '.vs.'
+    separate(pops, into = c("pop1", "pop2"), sep = "\\.vs\\.") %>%
+    # Optionally, ensure that 'pop1' and 'pop2' are factors or characters, if needed
+    mutate(across(c(pop1, pop2), as.character))  # You can adjust this as needed
+})# Add 'pops' column with the dataframe name
+
+# Ensure the names are preserved
+names(opensea_1kb_list) <- original_names
+
+#Loop through the list and add bp_cum for plotting
+for (name in names(opensea_1kb_list)) {
+  # Get the dataframe
+  df <- opensea_1kb_list[[name]]
+  
+  #Rename the pst column for plotting
+  pst_col_names <- grep("\\.pst$", names(df), value = TRUE)
+  if (length(pst_col_names) > 0) {
+    df <- df %>% rename(opensea.pst.1kb = all_of(pst_col_names))
+  }
+  # Step 1: Calculate cumulative bp_add from the hr.genome track (necessary to have fst and pst on the same x-axis scale)
+  data_cum <- hr.genome %>%
+    group_by(chr) %>%
+    dplyr::summarize(max_bp = max(max_bp)) %>%
+    mutate(bp_add = lag(cumsum(max_bp), default = 0))
+  
+  # Convert bp_add to numeric
+  data_cum$bp_add <- as.numeric(data_cum$bp_add)
+  
+  # Step 2: Join with the original dataframe and calculate bp_cum
+  df <- df %>%
+    inner_join(data_cum, by = "chr") %>%
+    mutate(window_center = as.numeric(pos + 5000),
+           bp_cum = window_center + bp_add)
+  
+  # Step 3: Save the updated dataframe back into the list
+  opensea_1kb_list[[name]] <- df
+}
+
+```
+
+Opensea 2kb
+```{r, message=FALSE, warning=FALSE}
+# Get the list of all `.pst` columns
+pst_columns <- grep("\\.pst$", names(pst.opensea.2), value = TRUE)
+
+# Initialize an empty list to store the resulting dataframes
+opensea_2kb_list <- list()
+
+# Loop through each `.pst` column
+for (pst_col in pst_columns) {
+  # Create a new dataframe with chr, pos, and the current pst column
+  df_pst <- pst.opensea.2 %>%
+    select(chr, pos, !!pst_col)
+  
+  # Store the result in the list with the name of the pst column
+  opensea_2kb_list[[pst_col]] <- df_pst
+}
+
+original_names <- names(opensea_2kb_list)
+
+opensea_2kb_list <- lapply(names(opensea_2kb_list), function(name) {
+  opensea_2kb_list[[name]] %>%
+    mutate(pops = name)  %>%
+    mutate(pops = str_remove(pops, ".pst")) %>%
+    # Split the 'pops' column into 'pop1' and 'pop2' by '.vs.'
+    separate(pops, into = c("pop1", "pop2"), sep = "\\.vs\\.") %>%
+    # Optionally, ensure that 'pop1' and 'pop2' are factors or characters, if needed
+    mutate(across(c(pop1, pop2), as.character))  # You can adjust this as needed
+})# Add 'pops' column with the dataframe name
+
+# Ensure the names are preserved
+names(opensea_2kb_list) <- original_names
+
+#Loop through the list and add bp_cum for plotting
+for (name in names(opensea_2kb_list)) {
+  # Get the dataframe
+  df <- opensea_2kb_list[[name]]
+  
+  #Rename the pst column for plotting
+  pst_col_names <- grep("\\.pst$", names(df), value = TRUE)
+  if (length(pst_col_names) > 0) {
+    df <- df %>% rename(opensea.pst.2kb = all_of(pst_col_names))
+  }
+  # Step 1: Calculate cumulative bp_add from the hr.genome track (necessary to have fst and pst on the same x-axis scale)
+  data_cum <- hr.genome %>%
+    group_by(chr) %>%
+    dplyr::summarize(max_bp = max(max_bp)) %>%
+    mutate(bp_add = lag(cumsum(max_bp), default = 0))
+  
+  # Convert bp_add to numeric
+  data_cum$bp_add <- as.numeric(data_cum$bp_add)
+  
+  # Step 2: Join with the original dataframe and calculate bp_cum
+  df <- df %>%
+    inner_join(data_cum, by = "chr") %>%
+    mutate(window_center = as.numeric(pos + 5000),
+           bp_cum = window_center + bp_add)
+  
+  # Step 3: Save the updated dataframe back into the list
+  opensea_2kb_list[[name]] <- df
+}
+
+```
+
+Opensea 5kb
+```{r, message=FALSE, warning=FALSE}
+# Get the list of all `.pst` columns
+pst_columns <- grep("\\.pst$", names(pst.opensea.5), value = TRUE)
+
+# Initialize an empty list to store the resulting dataframes
+opensea_5kb_list <- list()
+
+# Loop through each `.pst` column
+for (pst_col in pst_columns) {
+  # Create a new dataframe with chr, pos, and the current pst column
+  df_pst <- pst.opensea.5 %>%
+    select(chr, pos, !!pst_col)
+  
+  # Store the result in the list with the name of the pst column
+  opensea_5kb_list[[pst_col]] <- df_pst
+}
+
+original_names <- names(opensea_5kb_list)
+
+opensea_5kb_list <- lapply(names(opensea_5kb_list), function(name) {
+  opensea_5kb_list[[name]] %>%
+    mutate(pops = name)  %>%
+    mutate(pops = str_remove(pops, ".pst")) %>%
+    # Split the 'pops' column into 'pop1' and 'pop2' by '.vs.'
+    separate(pops, into = c("pop1", "pop2"), sep = "\\.vs\\.") %>%
+    # Optionally, ensure that 'pop1' and 'pop2' are factors or characters, if needed
+    mutate(across(c(pop1, pop2), as.character))  # You can adjust this as needed
+})# Add 'pops' column with the dataframe name
+
+# Ensure the names are preserved
+names(opensea_5kb_list) <- original_names
+
+#Loop through the list and add bp_cum for plotting
+for (name in names(opensea_5kb_list)) {
+  # Get the dataframe
+  df <- opensea_5kb_list[[name]]
+  
+  #Rename the pst column for plotting
+  pst_col_names <- grep("\\.pst$", names(df), value = TRUE)
+  if (length(pst_col_names) > 0) {
+    df <- df %>% rename(opensea.pst.5kb = all_of(pst_col_names))
+  }
+  # Step 1: Calculate cumulative bp_add from the hr.genome track (necessary to have fst and pst on the same x-axis scale)
+  data_cum <- hr.genome %>%
+    group_by(chr) %>%
+    dplyr::summarize(max_bp = max(max_bp)) %>%
+    mutate(bp_add = lag(cumsum(max_bp), default = 0))
+  
+  # Convert bp_add to numeric
+  data_cum$bp_add <- as.numeric(data_cum$bp_add)
+  
+  # Step 2: Join with the original dataframe and calculate bp_cum
+  df <- df %>%
+    inner_join(data_cum, by = "chr") %>%
+    mutate(window_center = as.numeric(pos + 5000),
+           bp_cum = window_center + bp_add)
+  
+  # Step 3: Save the updated dataframe back into the list
+  opensea_5kb_list[[name]] <- df
+}
+
+```
+
+Opensea 10kb
+```{r, message=FALSE, warning=FALSE}
+# Get the list of all `.pst` columns
+pst_columns <- grep("\\.pst$", names(pst.opensea.10), value = TRUE)
+
+# Initialize an empty list to store the resulting dataframes
+opensea_10kb_list <- list()
+
+# Loop through each `.pst` column
+for (pst_col in pst_columns) {
+  # Create a new dataframe with chr, pos, and the current pst column
+  df_pst <- pst.opensea.10 %>%
+    select(chr, pos, !!pst_col)
+  
+  # Store the result in the list with the name of the pst column
+  opensea_10kb_list[[pst_col]] <- df_pst
+}
+
+original_names <- names(opensea_10kb_list)
+
+opensea_10kb_list <- lapply(names(opensea_10kb_list), function(name) {
+  opensea_10kb_list[[name]] %>%
+    mutate(pops = name)  %>%
+    mutate(pops = str_remove(pops, ".pst")) %>%
+    # Split the 'pops' column into 'pop1' and 'pop2' by '.vs.'
+    separate(pops, into = c("pop1", "pop2"), sep = "\\.vs\\.") %>%
+    # Optionally, ensure that 'pop1' and 'pop2' are factors or characters, if needed
+    mutate(across(c(pop1, pop2), as.character))  # You can adjust this as needed
+})# Add 'pops' column with the dataframe name
+
+# Ensure the names are preserved
+names(opensea_10kb_list) <- original_names
+
+#Loop through the list and add bp_cum for plotting
+for (name in names(opensea_10kb_list)) {
+  # Get the dataframe
+  df <- opensea_10kb_list[[name]]
+  
+  #Rename the pst column for plotting
+  pst_col_names <- grep("\\.pst$", names(df), value = TRUE)
+  if (length(pst_col_names) > 0) {
+    df <- df %>% rename(opensea.pst.10kb = all_of(pst_col_names))
+  }
+  # Step 1: Calculate cumulative bp_add from the hr.genome track (necessary to have fst and pst on the same x-axis scale)
+  data_cum <- hr.genome %>%
+    group_by(chr) %>%
+    dplyr::summarize(max_bp = max(max_bp)) %>%
+    mutate(bp_add = lag(cumsum(max_bp), default = 0))
+  
+  # Convert bp_add to numeric
+  data_cum$bp_add <- as.numeric(data_cum$bp_add)
+  
+  # Step 2: Join with the original dataframe and calculate bp_cum
+  df <- df %>%
+    inner_join(data_cum, by = "chr") %>%
+    mutate(window_center = as.numeric(pos + 5000),
+           bp_cum = window_center + bp_add)
+  
+  # Step 3: Save the updated dataframe back into the list
+  opensea_10kb_list[[name]] <- df
+}
+
+```
+
+##Load FST data 
+Put the FST into the proper format for plotting, by adding the total bp for each chromosome and reducing some data points
+```{r}
+fst_columns <- grep("\\.fst$", names(fst.pw), value = TRUE)
+
+# Initialize an empty list to store the resulting dataframes
+fst_list <- list()
+fst_points_list <- list()
+
+
+# Loop through each `.fst` column
+for (fst_col in fst_columns) {
+  # Create a new dataframe with chr, pos, and the current pst column
+  df_fst <- fst.pw %>%
+    select(chr, window_start, window_end, !!fst_col) %>%
+    rename(fst = !!sym(fst_col))
+  
+  # Add the bp_max, bp_add for plotting
+  df_fst_windows <- df_fst %>%
+    inner_join(data_cum, by = "chr") %>%
+    mutate(window_end = as.numeric(window_end),
+           bp_cum = window_end + bp_add) %>%
+    filter(!is.na(fst)) %>% 
+    filter(!fst < 0) %>% 
+    select(-bp_add, -max_bp)
+  
+  # Set axis for plotting using df_fst_windows (not fst.gc)
+  axis_set <- df_fst_windows %>%
+    group_by(chr) %>%
+    dplyr::summarize(center = mean(bp_cum))  # Use df_fst_windows here
+  
+  # Reduce data points for plotting by choosing one fst for a larger region
+  fst_window <- df_fst_windows %>%
+    group_by(chr) %>%                              # Group by chromosome
+    arrange(chr, bp_cum) %>%                       # Sort data for smooth line connections
+    ungroup()
+
+  fst_points <- df_fst_windows 
+
+  # Store the result in the list with the name of the pst column
+  fst_list[[fst_col]] <- fst_window
+  fst_points_list[[fst_col]] <- fst_points
+  
+}
+
+original_names <- names(fst_list)
+
+fst_list <- lapply(names(fst_list), function(name) {
+  # Add the pops column and modify the dataframe
+  df <- fst_list[[name]] %>%
+    mutate(pops = name) %>%
+    mutate(pops = str_remove(pops, "\\.vs\\.fst")) %>%
+    # Split the 'pops' column into 'pop1' and 'pop2' by '.vs.'
+    separate(pops, into = c("pop1", "pop2"), sep = "\\.vs\\.") %>%
+    # Optionally, ensure that 'pop1' and 'pop2' are factors or characters, if needed
+    mutate(across(c(pop1, pop2), as.character))  # Convert to character if needed
+  
+  # Return the modified dataframe with the original name
+  return(df)
+})
+
+# Ensure the names are preserved
+names(fst_list) <- original_names
+
+original_names <- names(fst_points_list)
+
+fst_points_list <- lapply(names(fst_points_list), function(name) {
+  # Add the pops column and modify the dataframe
+  df <- fst_points_list[[name]] %>%
+    mutate(pops = name) %>%
+    mutate(pops = str_remove(pops, "\\.vs\\.fst")) %>%
+    # Split the 'pops' column into 'pop1' and 'pop2' by '.vs.'
+    separate(pops, into = c("pop1", "pop2"), sep = "\\.vs\\.") %>%
+    # Optionally, ensure that 'pop1' and 'pop2' are factors or characters, if needed
+    mutate(across(c(pop1, pop2), as.character))  # Convert to character if needed
+  
+  # Return the modified dataframe with the original name
+  return(df)
+})
+
+# Ensure the names are preserved
+names(fst_points_list) <- original_names
+
+```
+
+```{r}
+join_cpg_lists <- function(list1, list2, list3, list4, join_by = c("chr", "pos")) {
+  
+  joined_list <- list()
+  
+  # Get all unique names from all lists
+  all_names <- unique(c(names(list1), names(list2), names(list3), names(list4)))
+  
+  for (name in all_names) {
+    
+    df1 <- list1[[name]]
+    df2 <- list2[[name]]
+    df3 <- list3[[name]]
+    df4 <- list4[[name]]
+    
+    # Check which dataframes exist for this name
+    dfs_to_join <- list()
+    if (!is.null(df1)) dfs_to_join <- c(dfs_to_join, list(df1))
+    if (!is.null(df2)) dfs_to_join <- c(dfs_to_join, list(df2))
+    if (!is.null(df3)) dfs_to_join <- c(dfs_to_join, list(df3))
+    if (!is.null(df4)) dfs_to_join <- c(dfs_to_join, list(df4))
+    
+    # Perform the joins if there are dataframes to join
+    if (length(dfs_to_join) > 0) {
+      
+      joined_df <- reduce(dfs_to_join, function(x, y) full_join(x, y, by = join_by))
+      
+      joined_list[[name]] <- joined_df
+    }
+  }
+  
+  return(joined_list)
+}
+
+
+joined_cpg <- join_cpg_lists(cpgi_1kb_list, cpgi_2kb_list, cpgi_5kb_list, cpgi_10kb_list)
+#str(joined_cpg)
+
+joined_opensea <- join_cpg_lists(opensea_1kb_list, opensea_2kb_list, opensea_5kb_list, opensea_10kb_list)
+```
+
+
+```{r}
+join_dataframes <- function(fst_list, result_list) {
+  joined_list <- list()
+  
+  for (fst_name in names(fst_list)) {
+    for (result_name in names(result_list)) {
+      
+      # Check if the names match (excluding last 3 characters)
+      if (substr(fst_name, 1, nchar(fst_name) - 7) == substr(result_name, 1, nchar(result_name) - 4)) {
+        
+        # Perform the full join
+        joined_df <- full_join(fst_list[[fst_name]], result_list[[result_name]], 
+                               by = c("chr" = "chr", "window_start" = "pos"), 
+                               suffix = c(".fst", ".pst"))
+        
+        # Add the joined dataframe to the list
+        joined_list[[paste(fst_name, result_name, sep = ".joined.")]] <- joined_df
+        
+        # Break out of the inner loop since a match was found
+        break 
+      }
+    }
+  }
+  return(joined_list)
+}
+
+joined_fst_cpg <- join_dataframes(fst_list, joined_cpg)
+
+joined_fst_opensea <- join_dataframes(fst_list, joined_opensea)
+```
+
+
+##Make correlation between bins 1kb
+
+```{r}
+calculate_correlation_and_plot <- function(df, df_name) {
+  # Filter out rows with NA in either column
+  filtered_df <- df %>%
+    filter(!is.na(fst), !is.na(cpgi.pst.1kb))
+
+  # Calculate correlation
+  correlation <- cor(filtered_df$fst, filtered_df$cpgi.pst.1kb)
+
+  # Create scatterplot with geom_smooth
+  plot <- ggplot(filtered_df, aes(x = fst, y = cpgi.pst.1kb)) +
+    geom_point() +
+    geom_smooth(method = "lm", se = TRUE) +
+    labs(
+      title = paste("Scatterplot of fst vs cpgi.pst in", df_name),
+      x = "fst",
+      y = "cpgi.pst.1kb",
+      subtitle = paste("Correlation:", round(correlation, 3))
+    )
+
+  # Return correlation value and plot
+  return(list(correlation = correlation, plot = plot))
+}
+
+# Apply function to each dataframe in the list
+corr_results <- lapply(names(joined_fst_cpg), function(df_name) {
+  result <- calculate_correlation_and_plot(joined_fst_cpg[[df_name]], df_name)
+  return(c(list(df_name = df_name), result))
+})
+
+# Extract correlation values into a dataframe
+correlation_df_cpgi_1kb <- data.frame(
+  df_name = sapply(corr_results, `[[`, "df_name"),
+  correlation = sapply(corr_results, `[[`, "correlation")
+)
+
+# Print correlation dataframe
+print(correlation_df_cpgi_1kb)
+
+# Print plots (optional)
+for (result in corr_results) {
+  print(result$plot)
+}
+
+
+```
+
+##Make correlation between bins 2kb
+
+```{r}
+calculate_correlation_and_plot <- function(df, df_name) {
+  # Filter out rows with NA in either column
+  filtered_df <- df %>%
+    filter(!is.na(fst), !is.na(cpgi.pst.2kb))
+
+  # Calculate correlation
+  correlation <- cor(filtered_df$fst, filtered_df$cpgi.pst.2kb)
+
+  # Create scatterplot with geom_smooth
+  plot <- ggplot(filtered_df, aes(x = fst, y = cpgi.pst.2kb)) +
+    geom_point() +
+    geom_smooth(method = "lm", se = TRUE) +
+    labs(
+      title = paste("Scatterplot of fst vs cpgi.pst in", df_name),
+      x = "fst",
+      y = "cpgi.pst.2kb",
+      subtitle = paste("Correlation:", round(correlation, 3))
+    )
+
+  # Return correlation value and plot
+  return(list(correlation = correlation, plot = plot))
+}
+
+# Apply function to each dataframe in the list
+corr_results <- lapply(names(joined_fst_cpg), function(df_name) {
+  result <- calculate_correlation_and_plot(joined_fst_cpg[[df_name]], df_name)
+  return(c(list(df_name = df_name), result))
+})
+
+# Extract correlation values into a dataframe
+correlation_df_cpgi_2kb <- data.frame(
+  df_name = sapply(corr_results, `[[`, "df_name"),
+  correlation = sapply(corr_results, `[[`, "correlation")
+)
+
+# Print correlation dataframe
+print(correlation_df_cpgi_2kb)
+
+# Print plots (optional)
+for (result in corr_results) {
+  print(result$plot)
+}
+
+
+```
+
+##Make correlation between bins 5kb
+
+```{r}
+calculate_correlation_and_plot <- function(df, df_name) {
+  # Filter out rows with NA in either column
+  filtered_df <- df %>%
+    filter(!is.na(fst), !is.na(cpgi.pst.5kb))
+
+  # Calculate correlation
+  correlation <- cor(filtered_df$fst, filtered_df$cpgi.pst.5kb)
+
+  # Create scatterplot with geom_smooth
+  plot <- ggplot(filtered_df, aes(x = fst, y = cpgi.pst.5kb)) +
+    geom_point() +
+    geom_smooth(method = "lm", se = TRUE) +
+    labs(
+      title = paste("Scatterplot of fst vs cpgi.pst in", df_name),
+      x = "fst",
+      y = "cpgi.pst.5kb",
+      subtitle = paste("Correlation:", round(correlation, 3))
+    )
+
+  # Return correlation value and plot
+  return(list(correlation = correlation, plot = plot))
+}
+
+# Apply function to each dataframe in the list
+corr_results <- lapply(names(joined_fst_cpg), function(df_name) {
+  result <- calculate_correlation_and_plot(joined_fst_cpg[[df_name]], df_name)
+  return(c(list(df_name = df_name), result))
+})
+
+# Extract correlation values into a dataframe
+correlation_df_cpgi_5kb <- data.frame(
+  df_name = sapply(corr_results, `[[`, "df_name"),
+  correlation = sapply(corr_results, `[[`, "correlation")
+)
+
+# Print correlation dataframe
+print(correlation_df_cpgi_5kb)
+
+# Print plots (optional)
+for (result in corr_results) {
+  print(result$plot)
+}
+
+
+```
+
+##Make correlation between bins 10kb
+
+```{r}
+calculate_correlation_and_plot <- function(df, df_name) {
+  # Filter out rows with NA in either column
+  filtered_df <- df %>%
+    filter(!is.na(fst), !is.na(cpgi.pst.10kb))
+
+  # Calculate correlation
+  correlation <- cor(filtered_df$fst, filtered_df$cpgi.pst.10kb)
+
+  # Create scatterplot with geom_smooth
+  plot <- ggplot(filtered_df, aes(x = fst, y = cpgi.pst.10kb)) +
+    geom_point() +
+    geom_smooth(method = "lm", se = TRUE) +
+    labs(
+      title = paste("Scatterplot of fst vs cpgi.pst in", df_name),
+      x = "fst",
+      y = "cpgi.pst.5kb",
+      subtitle = paste("Correlation:", round(correlation, 3))
+    )
+
+  # Return correlation value and plot
+  return(list(correlation = correlation, plot = plot))
+}
+
+# Apply function to each dataframe in the list
+corr_results <- lapply(names(joined_fst_cpg), function(df_name) {
+  result <- calculate_correlation_and_plot(joined_fst_cpg[[df_name]], df_name)
+  return(c(list(df_name = df_name), result))
+})
+
+# Extract correlation values into a dataframe
+correlation_df_cpgi_10kb <- data.frame(
+  df_name = sapply(corr_results, `[[`, "df_name"),
+  correlation = sapply(corr_results, `[[`, "correlation")
+)
+
+# Print correlation dataframe
+print(correlation_df_cpgi_10kb)
+
+# Print plots (optional)
+for (result in corr_results) {
+  print(result$plot)
+}
+
+
+```
+
+##Make correlation between bins (opensea)
+
+```{r}
+calculate_correlation_and_plot <- function(df, df_name) {
+  # Filter out rows with NA in either column
+  filtered_df <- df %>%
+    filter(!is.na(fst), !is.na(opensea.pst.1kb))
+
+  # Calculate correlation
+  correlation <- cor(filtered_df$fst, filtered_df$opensea.pst.1kb)
+
+  # Create scatterplot with geom_smooth
+  plot <- ggplot(filtered_df, aes(x = fst, y = opensea.pst.1kb)) +
+    geom_point() +
+    geom_smooth(method = "lm", se = TRUE) +
+    labs(
+      title = paste("Scatterplot of fst vs opensea.pst in", df_name),
+      x = "fst",
+      y = "opensea.pst.1kb",
+      subtitle = paste("Correlation:", round(correlation, 3))
+    )
+
+  # Return correlation value and plot
+  return(list(correlation = correlation, plot = plot))
+}
+
+# Apply function to each dataframe in the list
+corr_results_open <- lapply(names(joined_fst_opensea), function(df_name) {
+  result <- calculate_correlation_and_plot(joined_fst_opensea[[df_name]], df_name)
+  return(c(list(df_name = df_name), result))
+})
+
+# Extract correlation values into a dataframe
+correlation_df_open_1kb <- data.frame(
+      df_name = sapply(corr_results_open, `[[`, "df_name"),
+  correlation = sapply(corr_results_open, `[[`, "correlation")
+)
+
+# Print correlation dataframe
+print(correlation_df_open_1kb)
+
+# Print plots (optional)
+for (result in corr_results) {
+  print(result$plot)
+}
+```
+##Make correlation between bins (opensea - 2kb)
+
+```{r}
+calculate_correlation_and_plot <- function(df, df_name) {
+  # Filter out rows with NA in either column
+  filtered_df <- df %>%
+    filter(!is.na(fst), !is.na(opensea.pst.2kb))
+
+  # Calculate correlation
+  correlation <- cor(filtered_df$fst, filtered_df$opensea.pst.2kb)
+
+  # Create scatterplot with geom_smooth
+  plot <- ggplot(filtered_df, aes(x = fst, y = opensea.pst.2kb)) +
+    geom_point() +
+    geom_smooth(method = "lm", se = TRUE) +
+    labs(
+      title = paste("Scatterplot of fst vs opensea.pst in", df_name),
+      x = "fst",
+      y = "opensea.pst.2kb",
+      subtitle = paste("Correlation:", round(correlation, 3))
+    )
+
+  # Return correlation value and plot
+  return(list(correlation = correlation, plot = plot))
+}
+
+# Apply function to each dataframe in the list
+corr_results_open <- lapply(names(joined_fst_opensea), function(df_name) {
+  result <- calculate_correlation_and_plot(joined_fst_opensea[[df_name]], df_name)
+  return(c(list(df_name = df_name), result))
+})
+
+# Extract correlation values into a dataframe
+correlation_df_open_2kb <- data.frame(
+      df_name = sapply(corr_results_open, `[[`, "df_name"),
+  correlation = sapply(corr_results_open, `[[`, "correlation")
+)
+
+# Print correlation dataframe
+print(correlation_df_open_2kb)
+
+# Print plots (optional)
+for (result in corr_results) {
+  print(result$plot)
+}
+```
+
+##Make correlation between bins (opensea - 5kb)
+
+```{r}
+calculate_correlation_and_plot <- function(df, df_name) {
+  # Filter out rows with NA in either column
+  filtered_df <- df %>%
+    filter(!is.na(fst), !is.na(opensea.pst.5kb))%>%
+    filter(fst < 0.2)
+
+  # Calculate correlation
+  correlation <- cor(filtered_df$fst, filtered_df$opensea.pst.5kb)
+
+  # Create scatterplot with geom_smooth
+  plot <- ggplot(filtered_df, aes(x = fst, y = opensea.pst.5kb)) +
+    geom_point() +
+    geom_smooth(method = "lm", se = TRUE) +
+    labs(
+      title = paste("Scatterplot of fst vs opensea.pst in", df_name),
+      x = "fst",
+      y = "opensea.pst.5kb",
+      subtitle = paste("Correlation:", round(correlation, 3))
+    )
+
+  # Return correlation value and plot
+  return(list(correlation = correlation, plot = plot))
+}
+
+# Apply function to each dataframe in the list
+corr_results_open <- lapply(names(joined_fst_opensea), function(df_name) {
+  result <- calculate_correlation_and_plot(joined_fst_opensea[[df_name]], df_name)
+  return(c(list(df_name = df_name), result))
+})
+
+# Extract correlation values into a dataframe
+correlation_df_open_5kb <- data.frame(
+      df_name = sapply(corr_results_open, `[[`, "df_name"),
+  correlation = sapply(corr_results_open, `[[`, "correlation")
+)
+
+# Print correlation dataframe
+print(correlation_df_open_5kb)
+
+# Print plots (optional)
+for (result in corr_results) {
+  print(result$plot)
+}
+```
+
+##Make correlation between bins (opensea - 10kb)
+
+```{r}
+calculate_correlation_and_plot <- function(df, df_name) {
+  # Filter out rows with NA in either column
+  filtered_df <- df %>%
+    filter(!is.na(fst), !is.na(opensea.pst.10kb))
+
+  # Calculate correlation
+  correlation <- cor(filtered_df$fst, filtered_df$opensea.pst.10kb)
+
+  # Create scatterplot with geom_smooth
+  plot <- ggplot(filtered_df, aes(x = fst, y = opensea.pst.10kb)) +
+    geom_point() +
+    geom_smooth(method = "lm", se = TRUE) +
+    labs(
+      title = paste("Scatterplot of fst vs opensea.pst in", df_name),
+      x = "fst",
+      y = "opensea.pst.5kb",
+      subtitle = paste("Correlation:", round(correlation, 3))
+    )
+
+  # Return correlation value and plot
+  return(list(correlation = correlation, plot = plot))
+}
+
+# Apply function to each dataframe in the list
+corr_results_open <- lapply(names(joined_fst_opensea), function(df_name) {
+  result <- calculate_correlation_and_plot(joined_fst_opensea[[df_name]], df_name)
+  return(c(list(df_name = df_name), result))
+})
+
+# Extract correlation values into a dataframe
+correlation_df_open_10kb <- data.frame(
+      df_name = sapply(corr_results_open, `[[`, "df_name"),
+  correlation = sapply(corr_results_open, `[[`, "correlation")
+)
+
+# Print correlation dataframe
+print(correlation_df_open_10kb)
+
+# Print plots (optional)
+for (result in corr_results) {
+  print(result$plot)
+}
+```
+
+Join correlation dataframes to plot
+
+```{r}
+#cpgi
+correlation_df_cpgi_1kb <- correlation_df_cpgi_1kb %>%
+  rename(cpgi_1kb = correlation)
+
+correlation_df_cpgi_5kb <- correlation_df_cpgi_5kb %>%
+  rename(cpgi_5kb = correlation)
+
+correlation_df_cpgi_10kb <- correlation_df_cpgi_10kb %>%
+  rename(cpgi_10kb = correlation)
+
+#opensea
+correlation_df_open_1kb <- correlation_df_open_1kb %>%
+  rename(opensea_1kb = correlation)
+
+correlation_df_open_5kb <- correlation_df_open_5kb %>%
+  rename(opensea_5kb = correlation)
+
+correlation_df_open_10kb <- correlation_df_open_10kb %>%
+  rename(opensea_10kb = correlation)
+
+corr_results <- cbind(correlation_df_cpgi_1kb, correlation_df_cpgi_5kb, correlation_df_cpgi_10kb, correlation_df_open_1kb, correlation_df_open_5kb, correlation_df_open_10kb)
+
+corr_results <- corr_results %>% select(c(1,2,4,6,8,10,12))
+```
+
+
+```{r}
+# 1. Gather the data into long format
+corr_long <- corr_results %>%
+  pivot_longer(
+    cols = -df_name, # Exclude df_name column
+    names_to = "correlation_type",
+    values_to = "correlation_value"
+  )
+
+# 3. Define color palette
+color_palette <- c("tan","tan", "tan", "orange", "orange", "orange") 
+
+# 4. Create the boxplot with colors
+ggplot(corr_long, aes(x = correlation_type, y = correlation_value, fill = correlation_type)) +
+  geom_boxplot() +
+  geom_jitter(aes(x = correlation_type, y = correlation_value, color = df_name), width = 0.2, alpha = 0.5) +
+  scale_fill_manual(values = color_palette) +
+  labs(
+    #title = "Correlation Values by Type",
+    x = "Region",
+    y = "Correlation Value",
+    fill = "Correlation Group" # Legend title
+  ) +
+   theme_minimal()+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Optional: Add points with color
+ggplot(corr_long, aes(x = correlation_type, y = correlation_value, color = color_group)) +
+  geom_boxplot(fill = "white") + # White fill for boxplot so points are visible
+  geom_jitter(width = 0.2, alpha = 0.5) +
+  scale_color_manual(values = color_palette) +
+  labs(
+    title = "Correlation Values by Type",
+    x = "Correlation Type",
+    y = "Correlation Value",
+    color = "Correlation Group"
+  ) +
+  theme_minimal()+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+```{r}
+reu.t.cpgi.i <- cpgi_i_list$rustica.eu.vs.tytleri.pst %>% filter(cpgi.i.pst >0.6)
+
+reu.rr.cpgi.i <- cpgi_i_list$rustica.eu.vs.rustica.r.pst %>% filter(cpgi.i.pst >0.6)
+
+###pulled data from regional_windows_ r script to get region in chr05 that is extremely high in pST in cpgi intergenic windows, to look at how many cpg sites were used and also look at methylation between pops in this region
+chr5.high.region <- cpgi_values_window_ave %>% filter(chr == "chr05" & window_start_1 == "39540001")
+
+# 1. Pivot the data into long format
+methylation_long <- chr5.high.region %>%
+  pivot_longer(
+    cols = -c(chr, window_start_1, n_cpgi), # Exclude these columns
+    names_to = "sample_name",
+    values_to = "methylation_value"
+  )
+
+# 2. Add population column
+methylation_long <- methylation_long %>%
+  mutate(
+    population = case_when(
+      grepl("_S_", sample_name) ~ "S",
+      grepl("_TV_", sample_name) ~ "TV",
+      grepl("_E_", sample_name) ~ "E",
+      grepl("_G_", sample_name) ~ "G",
+      grepl("RU_13_R", sample_name) ~ "RU",
+      grepl("_T_", sample_name) ~ "T",
+      grepl("CH|DE|FI", sample_name) ~ "Reu",
+      TRUE ~ "Other" # For any unclassified samples
+    )
+  )
+
+# 3. Create the boxplot
+ggplot(methylation_long, aes(x = population, y = methylation_value)) +
+  geom_boxplot() +
+  labs(
+    title = "Methylation Values by Population",
+    x = "Population",
+    y = "Methylation Value"
+  )
+
+# Optional: Add jittered points
+ggplot(methylation_long, aes(x = population, y = methylation_value)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, alpha = 0.5) +
+  labs(
+    title = "Methylation Values by Population",
+    x = "Population",
+    y = "Methylation Value"
+  )
+###Its based on 3 CpG loci within this region...maybe we need to further restrict this to very high numbers of PST used
+
+```

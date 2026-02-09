@@ -1,0 +1,539 @@
+---
+title: "Correlations- PST/FST - 10kb windows"
+author: "Sarah Mueller"
+date: "2024-02-12"
+output: html_document
+---
+
+```{r setup}
+knitr::opts_chunk$set(echo = TRUE)
+### Libraries
+.libPaths(c(.libPaths(),"/dss/dsshome1/lxc0B/ra52qed/R/x86_64-pc-linux-gnu-library/4.2"))
+
+library(vegan)
+library(plyr)
+library(broom)
+library(readxl)
+library(cluster)
+library(ape)
+library(languageR)
+library(packfor)
+library(ggrepel)
+library(knitr)
+library(ggvenn)
+library(ggbreak)
+library(tidyr)
+library(dplyr)
+library(purrr)
+library(ggpmisc)
+library(gridExtra)
+library(stringr)
+library(ggplot2, lib = "/dss/dsshome1/lxc0B/ra52qed/R/x86_64-pc-linux-gnu-library/4.2")
+
+```
+
+##PST vs. FST comparison
+
+Fixed differences between TV and E,which are the 'most diverged' of the subspecies. My thought was to use these fixed differences, and compare what they look like across all populations from the FST and plot against the PST of +/- 100 bp 
+
+```{r message=FALSE, warning=FALSE}
+
+#load PST data
+pst.cpgi <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/0_window_pst/0_pst_cpgi_10kb_c05.txt", header=T)
+# Separate the site.id into chr and pos columns
+pst.cpgi <- pst.cpgi %>%
+  separate(site.id, into = c("chr", "pos"), sep = "\\.") %>%
+  mutate(pos = as.numeric(pos))
+#chr04 maps too long, remove these sites
+pst.cpgi <- pst.cpgi %>%
+  filter(!(chr == "chr04" & pos >= 37234403 & pos <= 73257096))%>%
+  filter(!(chr == "chr15"))
+
+#load PST data
+pst.shore <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/0_window_pst/0_pst_shore_10kb_c05.txt", header=T)
+# Separate the site.id into chr and pos columns
+pst.shore <- pst.shore %>%
+  separate(site.id, into = c("chr", "pos"), sep = "\\.") %>%
+  mutate(pos = as.numeric(pos))
+#chr04 maps too long, remove these sites
+pst.shore <- pst.shore %>%
+  filter(!(chr == "chr04" & pos >= 37234403 & pos <= 73257096))%>%
+  filter(!(chr == "chr15"))
+
+#load PST data
+pst.opensea <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/0_window_pst/0_pst_opensea_10kb_c05.txt", header=T)
+# Separate the site.id into chr and pos columns
+pst.opensea <- pst.opensea %>%
+  separate(site.id, into = c("chr", "pos"), sep = "\\.") %>%
+  mutate(pos = as.numeric(pos))
+pst.opensea <- pst.opensea %>%
+  filter(!(chr == "chr04" & pos >= 37234403 & pos <= 73257096)) %>%
+  filter(!(chr == "chr15"))
+
+#Create a vector of dataframe names 
+pst_df_names <- c("pst.cpgi", "pst.shore", "pst.opensea")
+
+#load FST
+fst.fd <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/5_WGS/1_Population_Structure/4_pixy/HR.168.invariant.10kb/HR.168.invariant.10kb_fst.txt", header=T)
+colnames(fst.fd) <- c("pop1", "pop2", "chr", "window_start", "window_end", "fst", "nsites")
+
+#pivot_shorter to match pst data
+fst.pw <- fst.fd %>%
+  mutate(comparison = paste(pop1, pop2, "fst", sep = ".vs.")) %>%  # Create a unique comparison column
+  select(chr, window_start, window_end, comparison, fst) %>%  # Select relevant columns
+  pivot_wider(
+    names_from = comparison,  # Create new columns from the comparison column
+    values_from = fst  # Fill values from avg_wc_fst
+  )
+
+fst.pw <- fst.pw %>%
+  rename("erythrogaster.vs.gutturalis.vs.fst" = "gutturalis.vs.erythrogaster.vs.fst") %>%
+  rename("erythrogaster.vs.rustica.eu.vs.fst" = "rustica.eu.vs.erythrogaster.vs.fst") %>%
+  rename("gutturalis.vs.rustica.eu.vs.fst" = "rustica.eu.vs.gutturalis.vs.fst") %>%
+  rename("rustica.r.vs.savignii.vs.fst" = "savignii.vs.rustica.r.vs.fst") %>%
+  rename("rustica.r.vs.transitiva.vs.fst" = "transitiva.vs.rustica.r.vs.fst")
+
+#add genome information
+hr.genome <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_genome_files/0_rename_chr/chromosomes.genome")
+colnames(hr.genome) <- c("chr", "max_bp")
+hr.genome <- hr.genome %>%
+  filter(!grepl("_random|W|Z", chr))
+#update chr04, as no snps past certain value
+hr.genome <- hr.genome %>%
+  mutate(max_bp = if_else(chr == "chr04", 37234403, max_bp))%>%
+  mutate(max_bp = if_else(chr == "chr15", 0, max_bp))
+
+```
+
+Loop through PST dataframes and create a list containing the different population comparisons for each dataframe
+
+```{r}
+# Initialize an empty list to store all the processed lists of dataframes
+all_processed_lists <- list()
+
+# Loop through each dataframe name
+for (df_name in pst_df_names) {
+  # Get the current dataframe using get()
+  current_df <- get(df_name)
+
+  # Get the list of all `.pst` columns
+  pst_columns <- grep("\\.pst$", names(current_df), value = TRUE)
+
+  # Initialize an empty list to store the resulting dataframes for the current main dataframe
+  current_list <- list()
+
+  # Loop through each `.pst` column
+  for (pst_col in pst_columns) {
+    # Create a new dataframe with chr, pos, and the current pst column
+    df_pst <- current_df %>%
+      select(chr, pos, !!pst_col)
+
+    # Store the result in the list with the name of the pst column
+    current_list[[pst_col]] <- df_pst
+  }
+
+  original_names <- names(current_list)
+
+  current_list <- lapply(names(current_list), function(name) {
+    current_list[[name]] %>%
+      mutate(pops = name) %>%
+      mutate(pops = str_remove(pops, "\\.pst$")) %>% # Ensure only the trailing .pst is removed
+      # Split the 'pops' column into 'pop1' and 'pop2' by '.vs.'
+      separate(pops, into = c("pop1", "pop2"), sep = "\\.vs\\.") %>%
+      # Optionally, ensure that 'pop1' and 'pop2' are factors or characters, if needed
+      mutate(across(c(pop1, pop2), as.character)) # You can adjust this as needed
+  }) # Add 'pops' column with the dataframe name
+
+  # Ensure the names are preserved
+  names(current_list) <- original_names
+
+  # Loop through the list and add bp_cum for plotting
+  for (name in names(current_list)) {
+    # Get the dataframe
+    df <- current_list[[name]]
+
+    # Rename the pst column for plotting
+    pst_col_names <- grep("\\.pst$", names(df), value = TRUE)
+    if (length(pst_col_names) > 0) {
+      new_col_name <- paste0(str_remove(df_name, "^pst\\."), ".pst")
+      df <- df %>% rename(!!new_col_name := all_of(pst_col_names))
+    }
+    # Step 1: Calculate cumulative bp_add from the hr.genome track
+    data_cum <- hr.genome %>%
+      group_by(chr) %>%
+      dplyr::summarize(max_bp = max(max_bp)) %>%
+      mutate(bp_add = lag(cumsum(max_bp), default = 0))
+
+    # Convert bp_add to numeric
+    data_cum$bp_add <- as.numeric(data_cum$bp_add)
+
+    # Step 2: Join with the original dataframe and calculate bp_cum
+    df <- df %>%
+      inner_join(data_cum, by = "chr") %>%
+      mutate(window_center = as.numeric(pos + 5000),
+             bp_cum = window_center + bp_add)
+
+    # Step 3: Save the updated dataframe back into the list
+    current_list[[name]] <- df
+  }
+
+  # Store the processed list for the current main dataframe
+  all_processed_lists[[df_name]] <- current_list
+}
+
+```
+
+##Load FST data 
+Put the FST into the proper format for plotting, by adding the total bp for each chromosome and reducing some data points
+```{r}
+fst_columns <- grep("\\.fst$", names(fst.pw), value = TRUE)
+
+# Initialize an empty list to store the resulting dataframes
+fst_list <- list()
+fst_points_list <- list()
+
+
+# Loop through each `.fst` column
+for (fst_col in fst_columns) {
+  # Create a new dataframe with chr, pos, and the current pst column
+  df_fst <- fst.pw %>%
+    select(chr, window_start, window_end, !!fst_col) %>%
+    rename(fst = !!sym(fst_col))
+  
+  # Add the bp_max, bp_add for plotting
+  df_fst_windows <- df_fst %>%
+    inner_join(data_cum, by = "chr") %>%
+    mutate(window_end = as.numeric(window_end),
+           bp_cum = window_end + bp_add) %>%
+    filter(!is.na(fst)) %>% 
+    filter(!fst < 0) %>% 
+    select(-bp_add, -max_bp)
+  
+  # Set axis for plotting using df_fst_windows (not fst.gc)
+  axis_set <- df_fst_windows %>%
+    group_by(chr) %>%
+    dplyr::summarize(center = mean(bp_cum))  # Use df_fst_windows here
+  
+  # Reduce data points for plotting by choosing one fst for a larger region
+  fst_window <- df_fst_windows %>%
+    group_by(chr) %>%                              # Group by chromosome
+    arrange(chr, bp_cum) %>%                       # Sort data for smooth line connections
+    ungroup()
+
+  fst_points <- df_fst_windows 
+
+  # Store the result in the list with the name of the pst column
+  fst_list[[fst_col]] <- fst_window
+  fst_points_list[[fst_col]] <- fst_points
+  
+}
+
+original_names <- names(fst_list)
+
+fst_list <- lapply(names(fst_list), function(name) {
+  # Add the pops column and modify the dataframe
+  df <- fst_list[[name]] %>%
+    mutate(pops = name) %>%
+    mutate(pops = str_remove(pops, "\\.vs\\.fst")) %>%
+    # Split the 'pops' column into 'pop1' and 'pop2' by '.vs.'
+    separate(pops, into = c("pop1", "pop2"), sep = "\\.vs\\.") %>%
+    # Optionally, ensure that 'pop1' and 'pop2' are factors or characters, if needed
+    mutate(across(c(pop1, pop2), as.character))  # Convert to character if needed
+  
+  # Return the modified dataframe with the original name
+  return(df)
+})
+
+# Ensure the names are preserved
+names(fst_list) <- original_names
+
+original_names <- names(fst_points_list)
+
+fst_points_list <- lapply(names(fst_points_list), function(name) {
+  # Add the pops column and modify the dataframe
+  df <- fst_points_list[[name]] %>%
+    mutate(pops = name) %>%
+    mutate(pops = str_remove(pops, "\\.vs\\.fst")) %>%
+    # Split the 'pops' column into 'pop1' and 'pop2' by '.vs.'
+    separate(pops, into = c("pop1", "pop2"), sep = "\\.vs\\.") %>%
+    # Optionally, ensure that 'pop1' and 'pop2' are factors or characters, if needed
+    mutate(across(c(pop1, pop2), as.character))  # Convert to character if needed
+  
+  # Return the modified dataframe with the original name
+  return(df)
+})
+
+# Ensure the names are preserved
+names(fst_points_list) <- original_names
+
+```
+
+```{r}
+fst_quantile_list <- lapply(fst_list, function(df) {
+  # Calculate the 95th percentile (top 5%) of the 'fst' column
+  quantile_95 <- quantile(df$fst, 0.95)
+
+  # Filter the data frame to keep only rows where 'fst' is greater than or equal to the 95th percentile
+  filtered_df <- filter(df, fst >= quantile_95)
+  return(filtered_df)
+})
+```
+
+```{r}
+join_multiple_lists <- function(list_of_lists, join_by = c("chr", "pos")) {
+  joined_master_list <- list()
+
+  # Get all unique inner list names across all main lists
+  all_inner_names <- unique(unlist(lapply(list_of_lists, names)))
+
+  for (inner_name in all_inner_names) {
+    # Extract the dataframes with the current inner name from each main list
+    dfs_to_join <- list_of_lists %>%
+      map(~ .[[inner_name]]) %>%
+      compact() # Remove NULL elements (where the inner name doesn't exist)
+
+    # Perform the joins if there are dataframes to join
+    if (length(dfs_to_join) > 0) {
+      joined_df <- purrr::reduce(dfs_to_join, function(x, y) full_join(x, y, by = join_by))
+      joined_master_list[[inner_name]] <- joined_df
+    }
+  }
+
+  return(joined_master_list)
+}
+
+# all_processed_lists is a list of lists, where each inner list contains dataframes for a specific prefix (e.g., pst.cpgi) and the keys of the inner lists are the comparison names (e.g., pop1.vs.pop2.pst). Therefore the prefix can also be changed if you only want to do a subset (for example if I only wanteed to join cpgi, then I would replace ^pst with "^pst\\.cpgi")
+
+# Grab cpgi list names 
+lists_to_join <- all_processed_lists[grep("^pst", names(all_processed_lists))]
+
+# Join these lists together
+joined_cpgi <- join_multiple_lists(lists_to_join)
+```
+
+##Join 95% quantile or above FST loci to the PST loci dataframe
+
+Here we can look at the number and distribution of PST loci that overlap with FST loci and see later if this shifts from background levels
+
+```{r}
+join_dataframes <- function(fst_list, result_list) {
+  joined_list <- list()
+  
+  for (fst_name in names(fst_list)) {
+    for (result_name in names(result_list)) {
+      
+      # Check if the names match (excluding last 3 characters)
+      if (substr(fst_name, 1, nchar(fst_name) - 7) == substr(result_name, 1, nchar(result_name) - 4)) {
+        
+        # Perform the full join
+        joined_df <- left_join(fst_list[[fst_name]], result_list[[result_name]], 
+                               by = c("chr" = "chr", "window_start" = "pos"), 
+                               suffix = c(".fst", ".pst"))
+        
+        # Add the joined dataframe to the list
+        joined_list[[paste(fst_name, result_name, sep = ".joined.")]] <- joined_df
+        
+        # Break out of the inner loop since a match was found
+        break 
+      }
+    }
+  }
+  return(joined_list)
+}
+
+joined_fst_cpg <- join_dataframes(fst_quantile_list, joined_cpgi)
+
+
+#Function to calculate how many PST 
+calculate_pst_ratio <- function(df) {
+  pst_cols <- grep("pst$", names(df), value = TRUE) # Pik ɔl kɔlɔm dɛn we dɔn wit "pst"
+  results <- data.frame(variable = pst_cols, ratio = NA_real_) # Intialize di datafreim fɔ rizults
+
+  for (col in pst_cols) {
+    results[results$variable == col, "ratio"] <- sum(!is.na(df[[col]])) / nrow(df)
+  }
+  return(results)
+}
+
+# 2. run function along all dataframe sin list
+results_list <- lapply(joined_fst_cpg, calculate_pst_ratio)
+
+# 3. Kɔmbayn di rizults dɛn insai wan datafreim
+final_results_df <- bind_rows(results_list, .id = "dataframe_name")
+
+# Print di faynal datafreim
+print(final_results_df)
+
+#Plotting distributions
+# Function to plot FST and PST distributions for a single dataframe
+plot_fst_pst_distributions <- function(df, df_name) {
+    pst_cols <- grep("pst$", names(df), value = TRUE)
+
+    # Select FST and PST columns.
+    plot_data <- df %>%
+        select(fst, !!!syms(pst_cols)) %>%
+        pivot_longer(cols = c(fst, !!!syms(pst_cols)), names_to = "variable", values_to = "value")
+
+    # Create the combined density plot
+    p <- ggplot(plot_data, aes(x = value, color = variable)) +
+        geom_density(aes(fill = variable), alpha = 0.5, color = "black") + # Density plot with filled area and black outline
+        labs(
+            title = paste("FST and PST Distributions for", df_name),
+            x = "Value",
+            y = "Density",
+            color = "Statistic",  # More informative legend title
+            fill = "Statistic"
+        ) +
+        theme_minimal() +
+        theme(
+            legend.position = "bottom" # Make legend more compact
+        ) +
+        scale_color_manual(values = rep("black", length(unique(plot_data$variable))))
+
+    return(p)
+}
+
+# Apply the plotting function to each dataframe in the list and store the plots
+plots_list <- lapply(names(joined_fst_cpg), function(df_name) {
+  plot_fst_pst_distributions(joined_fst_cpg[[df_name]], df_name)
+})
+
+# Print the plots
+for (p in plots_list) {
+  print(p)
+}
+
+
+```
+
+##Run the same but for background levels of PST loci
+
+```{r}
+# 1. join fst and pst
+joined_fst_cpg_background <- join_dataframes(fst_list, joined_cpgi)
+
+# 2. run function along all dataframe sin list
+results_list_background <- lapply(joined_fst_cpg_background, calculate_pst_ratio)
+
+# 3. Create dataframe from list
+final_results_background <- bind_rows(results_list_background, .id = "dataframe_name")
+
+# Look at results
+print(final_results_background)
+
+#Plotting distributions
+# Apply the plotting function to each dataframe in the list and store the plots
+plots_list <- lapply(names(joined_fst_cpg_background), function(df_name) {
+  plot_fst_pst_distributions(joined_fst_cpg_background[[df_name]], df_name)
+})
+
+# Print the plots (optional - this will print all plots to the console)
+for (p in plots_list) {
+  print(p)
+}
+
+
+```
+##Other way around, looking at high PST loci and the distribution of FST values
+
+```{r}
+pst_quantile_list <- lapply(joined_cpgi, function(df) {
+  # Calculate the 95th percentile (top 5%) of the 'fst' column
+  quantile_99 <- quantile(df$opensea.pst, 0.99, na.rm=TRUE)
+
+  # Filter the data frame to keep only rows where 'fst' is greater than or equal to the 95th percentile
+  filtered_df <- filter(df, opensea.pst >= quantile_99)
+  return(filtered_df)
+})
+```
+
+```{r}
+join_dataframes <- function(fst_list, result_list) {
+  joined_list <- list()
+  
+  for (fst_name in names(fst_list)) {
+    for (result_name in names(result_list)) {
+      
+      # Check if the names match (excluding last 3 characters)
+      if (substr(fst_name, 1, nchar(fst_name) - 7) == substr(result_name, 1, nchar(result_name) - 4)) {
+        
+        # Perform the full join
+        joined_df <- right_join(fst_list[[fst_name]], result_list[[result_name]], 
+                               by = c("chr" = "chr", "window_start" = "pos"), 
+                               suffix = c(".fst", ".pst"))
+        
+        # Add the joined dataframe to the list
+        joined_list[[paste(fst_name, result_name, sep = ".joined.")]] <- joined_df
+        
+        # Break out of the inner loop since a match was found
+        break 
+      }
+    }
+  }
+  return(joined_list)
+}
+
+joined_fst_cpg <- join_dataframes(fst_list, pst_quantile_list)
+
+
+#Function to calculate how many PST 
+calculate_pst_ratio <- function(df) {
+  pst_cols <- grep("fst$", names(df), value = TRUE) # 
+  results <- data.frame(variable = pst_cols, ratio = NA_real_) # 
+
+  for (col in pst_cols) {
+    results[results$variable == col, "ratio"] <- sum(!is.na(df[[col]])) / nrow(df)
+  }
+  return(results)
+}
+
+# 2. run function along all dataframe sin list
+results_list <- lapply(joined_fst_cpg, calculate_pst_ratio)
+
+# 3. Kɔmbayn di rizults dɛn insai wan datafreim
+final_results_df <- bind_rows(results_list, .id = "dataframe_name")
+
+# Print di faynal datafreim
+print(final_results_df)
+
+#Plotting distributions
+# Function to plot FST and PST distributions for a single dataframe
+plot_fst_pst_distributions <- function(df, df_name) {
+    pst_cols <- grep("pst$", names(df), value = TRUE)
+
+    # Select FST and PST columns.
+    plot_data <- df %>%
+        select(fst, !!!syms(pst_cols)) %>%
+        pivot_longer(cols = c(fst, !!!syms(pst_cols)), names_to = "variable", values_to = "value")
+
+    # Create the combined density plot
+    p <- ggplot(plot_data, aes(x = value, color = variable)) +
+        geom_density(aes(fill = variable), alpha = 0.5, color = "black") + # Density plot with filled area and black outline
+        labs(
+            title = paste("FST and PST Distributions for", df_name),
+            x = "Value",
+            y = "Density",
+            color = "Statistic",  # More informative legend title
+            fill = "Statistic"
+        ) +
+        theme_minimal() +
+        theme(
+            legend.position = "bottom" # Make legend more compact
+        ) +
+        scale_color_manual(values = rep("black", length(unique(plot_data$variable))))
+
+    return(p)
+}
+
+# Apply the plotting function to each dataframe in the list and store the plots
+plots_list <- lapply(names(joined_fst_cpg), function(df_name) {
+  plot_fst_pst_distributions(joined_fst_cpg[[df_name]], df_name)
+})
+
+# Print the plots
+for (p in plots_list) {
+  print(p)
+}
+
+
+```
