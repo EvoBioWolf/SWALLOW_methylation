@@ -1,0 +1,392 @@
+---
+title: "RDA analysis"
+author: "Sarah Mueller"
+date: "2025 - final"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+### Libraries
+
+.libPaths(c(.libPaths(),"/dss/dsshome1/lxc0B/ra52qed/R/x86_64-pc-linux-gnu-library/4.2"))
+
+library(vegan)
+library(packfor)
+library(viridisLite)
+library(ggplot2)
+library(plyr)
+library(tidyverse)
+library(broom)
+library(readxl)
+library(cluster)
+library(ape)
+library(languageR)
+library(ggrepel)
+#library(ggpubr)
+
+```
+
+## Set up data for RDA
+
+For RDA analysis we need both the DNA methylation (dependent variable) and our covariates (explanatory variables).
+
+
+```{r,warning=FALSE}
+#sample names
+sample_names <- read.table("/dss/dsshome1/lxc0B/ra52qed/gitlab/swallow.projects/scripts/0_sample.lists/sample.names.85.meth.sub.pop.txt", header=T)
+#get explanatory variables set
+info.climate <- read_xlsx("/dss/dsshome1/lxc0B/ra52qed/gitlab/swallow.projects/scripts/0_sample.lists/NCBI_info_updated_20220727_climate_data.xlsx", sheet = "Sheet7")
+#add PC axes from genomic PCA
+eigenvec <- "/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/5_WGS/1_Population_Structure/1_PCA/3_85.SM/HR.83.eigenvec"
+pc.eigen <- read.table(eigenvec)
+#read in general information table
+info.full <- read_xlsx("/dss/dsshome1/lxc0B/ra52qed/gitlab/swallow.projects/scripts/0_sample.lists/NCBI_info_updated_20220727_climate_data.xlsx")
+info.full <- full_join(info.full, info.climate, by= "sample_name")
+info.full <- left_join(info.full, pc.eigen, by= c("sample_name" = "V1"))
+#remove all individuals not used for this analysis
+info.full=info.full %>%
+  dplyr::slice(match(sample_names$V1, info.full$sample_name))
+info.full$pop <- as.factor(sample_names$pop)
+info.full$sub <- as.factor(sample_names$sub)
+info.full$Latitude.approx <- as.numeric(info.full$Latitude.approx)
+info.full$Longitude.approx <- as.numeric(info.full$Longitude.approx)
+
+#remove 2 samples that had bad quality genomic data and therfoer no PCA data and 1 sample that was assigned incorrectly in genomic data
+# Remove rows where info$sample_name matches the specified values
+info.full <- info.full[!info.full$sample_name %in% c("IL_15_TV_X242015_BL_ADL_F", "IL_15_TV_X242048_BL_ADL_F", "EG_15_S_1611_BL_ADL_U"), ]
+
+# Check the updated dataframe
+head(info.full)
+
+# select all columns that will be used as possible variables...this is key to analysis and may change between iterations -------
+# originally run with XXX environmental variable, longitude and latitude, PCA axis 1, and pop and subspecies AND sex. The following were kept for final analysis after forward testing permutations to determine significant variables
+info <- info.full %>%
+  dplyr::select("sex.rrbs", "tavg", "pres", "Latitude.approx", "Longitude.approx", "V3", "pop", "sub")%>% 
+  mutate_if(is.character,as.factor)
+info$pres <- as.numeric(info$pres)
+
+
+# summary to check if all are factor variables
+summary(info)
+
+# define color palette -----------------
+color_sub <- c(  "#08d124", #E
+                "#07038a", #G
+                "#d30000", #R
+                #"#9716a8", #RG
+                #"#FFA500", #RT
+                "#be6400", #S
+                "#622a0f", #TV
+                "#f4d000", #T
+                "grey") #NA/unknown
+
+
+
+# visualize using pairs ------------------
+pairscor.fnc(info)
+
+```
+
+## Load in methylation data
+
+Here, we can also specify a subset of samples if there are individuals we want to exclude
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+##load in methylkit object
+prop.168.20miss.merged <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_Pre-processing/4_methyl_calling/0_all_sites/168.20miss/prop.168.merged.20miss.rmlowv.rmout.txt", header=T)
+
+## remove individuals that are hybrids
+prop_nohyb <- prop.168.20miss.merged %>%
+  dplyr::select(contains("_R_") | contains("_G_") | contains("_T_") | contains("_S_") | contains("_TV_") | contains("_E_"))
+prop_nohyb <- na.omit(prop_nohyb)
+# Remove rows where info$sample_name matches the specified values
+prop_nohyb <- prop_nohyb[, !colnames(prop_nohyb) %in% c("ME_IL_15_TV_X242015_BL_ADL_F", "ME_IL_15_TV_X242048_BL_ADL_F", "ME_EG_15_S_1611_BL_ADL_U")]
+#re-order and flip axes
+prop_nohyb <- prop_nohyb[ , order(names(prop_nohyb))]
+prop_nohyb <- t(prop_nohyb)
+
+data(varespec)
+
+#Detrend methylation data (reduces impact of extreme methylation values and outliers)
+prop_nohyb <- decostand(prop_nohyb, method = "hellinger")
+```
+
+##Explore different distance indices
+
+In general, the higher should indicate better for analysis (according to the tutorial https://pmassicotte.github.io/stats-denmark-2019/07_rda.html#/a-concrete-example-6) 
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+
+#check the rank of different indices, in general the higher the number the better, although I am not really sure if this should be the basis for choosing one method over another
+#rankindex(prop_nohyb, info, indices = c("euc", "man", "gow","bra", "kul"), stepacross= FALSE, method = "spearman", na.rm=TRUE)
+```
+
+##Create a model using all variables
+
+We know from previous analysis on a subset of 17 known age and sex individuals that sex has a clear influence on methylation sites (see results of age and sex evaluation 3.1 and 3.2). Additionally from the RDA analysis on 168 individuals where sex was a significant variable. Therefore, we can use a partial RDA analysis.
+This partial RDA uses a matrix Y, explained by a matrix variables X, in the presence of co-variable(s) W. This analysis allows to display the patterns of the response data (Y) uniquely explained by a linear model of the explanatory variables (X) when the effect of other covariates (W) is held constant (Borcard, Gillet, and Legendre 2011).
+
+```{r, echo=F, message=FALSE, warning=FALSE}
+#Deal with two missing individuals in genomic PCA
+# Combine response and explanatory data to identify rows with missing values
+complete_data <- na.omit(cbind(prop_nohyb, info))
+
+# Split back into response and explanatory matrices
+prop_nohyb <- complete_data[, 1:ncol(prop_nohyb)]
+info <- complete_data[, (ncol(prop_nohyb) + 1):ncol(complete_data)]
+
+# Perform a full RDA with all explanatory variables
+full_model <- rda(prop_nohyb ~ ., data = info)
+
+#Look at colinearity before variable selection (general vid above 2 means high colinearity)
+sqrt(vif.cca(full_model))
+
+# Compute adjusted R² for the full model
+full_adjR2 <- RsquareAdj(full_model)$adj.r.squared
+print(paste("Adjusted R² of the full model:", full_adjR2))
+
+#need numic variables for forward.sel
+info$sex.rrbs <- as.numeric(info$sex.rrbs)
+info$pop <- as.numeric(as.factor(info$pop))
+info$sub <- as.numeric(as.factor(info$sub))
+
+info[] <- lapply(info, function(x) {
+  if (is.factor(x)) as.numeric(as.character(x)) else x
+})
+
+# Perform forward selection to identify significant variables
+selected_vars <- forward.sel(
+  Y = prop_nohyb,               # Response matrix
+  X = info,            # Explanatory matrix
+  adjR2thresh = full_adjR2,        # Threshold: full model adjusted R²
+  alpha = 0.05,                    # Significance level
+  nperm = 99                      # Number of permutations
+)
+
+# View selected variables
+print(selected_vars)
+
+# Extract significant variables
+significant_vars <- names(info)[selected_vars$order]
+
+# Create a reduced explanatory dataset
+reduced_data <- info[, significant_vars]
+
+# Fit the parsimonious RDA model
+parsimonious_model <- rda(prop_nohyb ~ ., data = reduced_data)
+
+# Compute adjusted R² for the parsimonious model
+parsimonious_adjR2 <- RsquareAdj(parsimonious_model)$adj.r.squared
+print(paste("Adjusted R² of the parsimonious model:", parsimonious_adjR2))
+
+```
+
+```{r, message=FALSE, warning=FALSE}
+# Partial RDA --------------
+
+##A partial rda which looks at possible explanatory variables while holding the variation from some others constant
+partial_rda <- dbrda(prop_nohyb ~ tavg + pres + Latitude.approx + Longitude.approx + V3 + pop + sub + Condition(sex.rrbs), reduced_data)
+
+#conditioned means explained by conditions, constrained explained by explanatory variables, unconstrained is unidentified variance
+summary(partial_rda)
+#However, this has not been corrected and lowers significantly when corrected
+global_r2 <- RsquareAdj(partial_rda) 
+
+
+#Rsquared
+global_r2 <- round(RsquareAdj(partial_rda)$adj.r.squared, digits=4)
+
+#1. global sig
+anova_global <- anova(partial_rda)
+p.val <- anova_global$`Pr(>F)`
+p.val
+
+##2. Axis significance
+anova.cca(partial_rda,  by="axis")
+#3. Term significance
+anova.cca(partial_rda,  by="terms")
+
+RsquareAdj(partial_rda)
+
+```
+
+
+
+```{r, message=FALSE, warning=FALSE}
+# Partial RDA --------------
+
+##A partial rda which looks at possible explanatory variables while holding the variation from some others constant
+partial_rda <- dbrda(prop_nohyb ~ V3 + pop + Longitude.approx + tavg + sub + Latitude.approx  + pres + Condition(sex.rrbs), reduced_data)
+
+#conditioned means explained by conditions, constrained explained by explanatory variables, unconstrained is unidentified variance
+summary(partial_rda)
+#However, this has not been corrected and lowers significantly when corrected
+global_r2 <- RsquareAdj(partial_rda) 
+
+
+#Rsquared
+global_r2 <- round(RsquareAdj(partial_rda)$adj.r.squared, digits=4)
+
+#1. global sig
+anova_global <- anova(partial_rda)
+p.val <- anova_global$`Pr(>F)`
+p.val
+
+##2. Axis significance
+anova.cca(partial_rda,  by="axis")
+#3. Term significance
+anova.cca(partial_rda,  by="terms")
+
+RsquareAdj(partial_rda)
+
+#pull R2 values for each component
+# Total inertia (total variance)
+total_inertia <- sum(partial_rda$CCA$eig) + sum(partial_rda$CA$eig)
+
+# Conditioned variance (variance explained by covariates)
+conditioned_inertia <- sum(partial_rda$pCCA$tot.chi)
+
+# Constrained variance (variance explained by explanatory variables)
+constrained_inertia <- sum(partial_rda$CCA$eig)
+
+# Residual (unconstrained) variance
+residual_inertia <- sum(partial_rda$CA$eig)
+
+# Proportion of variance explained
+conditioned_R2 <- conditioned_inertia / total_inertia
+constrained_R2 <- constrained_inertia / total_inertia
+residual_R2 <- residual_inertia / total_inertia
+
+# Print results
+cat("Conditioned R²:", conditioned_R2, "\n")
+cat("Constrained R²:", constrained_R2, "\n")
+cat("Residual R²:", residual_R2, "\n")
+
+
+```
+
+
+```{r}
+#Variance Paritioning
+
+#separate sex
+genetic <- reduced_data[,c(2:3,6)]
+spatial <- reduced_data[,c(4,7)]
+env <- reduced_data[,c(5,8)]
+covar <- reduced_data[,1]
+
+vp <- varpart(prop_nohyb, genetic, spatial, env, covar)
+
+
+plot(vp)
+```
+## Assign plotting functions
+
+Here, we can use a function that plots the PCA so we can plot several at once
+
+```{r}
+# Sites (individual scores)
+prda.sites <- scores(partial_rda, display = "sites")
+# Constraints (canonical axes)
+prda.constraints <- scores(partial_rda, display = "lc")
+# Biplot (explanatory variables)
+prda.biplot <- scores(partial_rda, display = "bp")
+
+#put as dataframes for easy working in ggplot
+prda.sites <- as.data.frame(prda.sites)
+prda.biplot <- as.data.frame(prda.biplot)
+
+# Proportion of variance explained by each constrained axis
+partial_rda$CCA$eig           # eigenvalues for constrained axes
+partial_rda$CCA$eig[1]        # first constrained eigenvalue
+
+# Total constrained variance
+sum(partial_rda$CCA$eig)      # sum of all constrained eigenvalues
+
+#Calculate total variance
+total_var <- sum(partial_rda$CCA$eig) + sum(partial_rda$CA$eig)
+
+# % of overall variance explained by first constrained axis
+pct_axis1 <- 100 * partial_rda$CCA$eig[1] / total_var
+pct_axis2 <- 100 * partial_rda$CCA$eig[2] / total_var
+
+#Fix sub and pop to plot correctly
+info.full <- info.full %>%
+  mutate(sub.pop = case_when(
+    sub == "G" ~ "GU",
+    sub == "T" ~ "TY",
+    sub == "TV" ~ "TR",
+    sub == "E" ~ "ER",
+    sub == "S" ~ "SA",
+    sub == "R" & pop == "EU" ~ "RUe",
+    sub == "R" & pop == "RU" ~ "RUr",
+    TRUE ~ NA_character_  # fallback for any unmatched rows
+  ))
+
+# Define the order
+subpop_levels <- c("SA", "TR", "RUe", "RUr", "GU", "TY", "ER")
+
+# Convert sub.pop to factor with correct order
+info.full <- info.full %>%
+  mutate(sub.pop = factor(sub.pop, levels = subpop_levels))
+
+# Make sure sub.pop is a factor with the desired legend order
+info.full$sub.pop <- factor(info.full$sub.pop, 
+                            levels = c("SA", "TR", "RUe", "RUr", "GU", "TY", "ER"))
+
+p <- ggplot() +
+  geom_point(data = prda.sites,
+             aes(x = dbRDA1, y = -dbRDA2,
+                 shape = info.full$sub.pop,
+                 fill = info.full$sub.pop,
+                 color = info.full$sub.pop),
+             size = 4) +
+  geom_segment(data = prda.biplot,
+               aes(x = 0, y = 0, xend = dbRDA1*7, yend = dbRDA2*7),
+               arrow = arrow(angle=22.5, length = unit(0.35,"cm"),
+                             type = "closed"),
+               linetype=1, size=0.6, colour = "grey77") +
+  geom_text_repel(data = prda.biplot,
+                  aes(x = dbRDA1*7, y = dbRDA2*7, label = rownames(prda.biplot))) +
+  scale_shape_manual(values = c("SA"=21, "TR"=23, "RUe"=22, 
+                                "RUr"=24, "GU"=3, "TY"=24, "ER"=25)) +
+  scale_fill_manual(values = c("SA"="#be6400", "TR"="#622a0f", "RUe"="#d30000", 
+                               "RUr"="#d30000", "GU"="#07038a", "TY"="#f4d000", "ER"="#08d124")) +
+  scale_color_manual(values = c("SA"="grey33", "TR"="grey33", "RUe"="grey33", 
+                                "RUr"="grey33", "GU"="#00316e", "TY"="grey33", "ER"="grey33")) +
+  labs(shape="Population", fill="Population", color="Population") +
+  labs(
+    x = paste0("dbRDA 1 (", round(pct_axis1, 2), "%)"),
+    y = paste0("dbRDA 2 (", round(pct_axis2, 2), "%)")
+  )+
+  guides(
+    shape = guide_legend(nrow = 1, byrow = TRUE, override.aes = list(size = 4)),
+    fill = guide_legend(nrow = 1, byrow = TRUE, override.aes = list(size = 4)),
+    color = guide_legend(nrow = 1, byrow = TRUE, override.aes = list(size = 4))
+  ) +
+  theme_bw() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    panel.grid = element_blank(),
+    legend.title = element_blank(),
+    legend.position = "bottom",
+    legend.box = "horizontal",
+    axis.text.x = element_text(size = 12),   # x-axis tick labels
+    axis.title.x = element_text(size = 12),  # x-axis title
+    axis.text.y = element_text(size = 12),
+    axis.title.y = element_text(size = 12)
+  ) +
+  xlim(-.8, .7) + ylim(-1.2, 1.2) +
+  ggtitle("RRBS")
+
+p
+```
+
+save image 
+
+```{r}
+ggsave("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/1_Population_Structure/2_RDA/1_RDA.85.20miss.png", plot = p, width = 5, height = 5.1, units = "in", dpi = 500)
+
+```
+

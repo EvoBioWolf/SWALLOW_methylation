@@ -1,0 +1,8 @@
+Location: (30.436734, 114.193377), Date: 2014-06-10
+            tavg  tmin  tmax  prcp  snow  wdir  wspd  wpgt  pres  tsun
+time                                                                  
+2014-06-10  28.9  23.2  36.1   NaN   NaN   NaN   6.0   NaN   NaN   NaN
+Location: (30.436734, 114.193377), Date: 2024-04-05
+            tavg  tmin  tmax  prcp  snow   wdir  wspd  wpgt    pres  tsun
+time                                                                     
+2024-04-05  14.8   9.8  19.1   0.3   NaN  346.0   7.1   NaN  1017.7   NaN

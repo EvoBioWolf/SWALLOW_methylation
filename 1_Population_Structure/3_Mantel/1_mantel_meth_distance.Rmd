@@ -1,0 +1,232 @@
+---
+title: "Mantel Tests"
+author: "Sarah Mueller"
+date: "2025 - final"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+##directory for libraries
+.libPaths(c(.libPaths(),"/dss/dsshome1/lxc0B/ra52qed/R/x86_64-pc-linux-gnu-library/4.2"))
+
+library(vegan)
+library(viridis)
+library(ggplot2)
+library(plyr)
+library(dplyr)
+library(broom)
+library(readxl)
+library(cluster)
+library(ape)
+library(languageR)
+library(ggrepel)
+library(geosphere)
+library(vcfR)
+library(adegenet)
+library(SNPRelate)
+library(gdata)
+library(dartR)
+
+#sample names
+sample_names <- read.table("/dss/dsshome1/lxc0B/ra52qed/gitlab/swallow.projects/scripts/0_sample.lists/sample.names.85.txt", header=F)
+#get explanatory variables set
+info <- read_xlsx("/dss/dsshome1/lxc0B/ra52qed/gitlab/swallow.projects/scripts/0_sample.lists/NCBI_info_updated_20220727_climate_data.xlsx")
+#remove all individuals not used for this analysis
+info=info %>%
+  dplyr::slice(match(sample_names$V1, info$sample_name))
+```
+
+## Methylation matrices
+I will run Mantel tests at the individuals and population level.
+For this, I need to create three matrices: 1) DNA methylation, 2)genetic, 3)geographic distances.
+
+I will use two different distance measures to look at how stable the results are across methods.
+
+```{r cars}
+#Load methylation matrix
+prop.168.20miss.merged <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_Pre-processing/4_methyl_calling/0_all_sites/168.20miss/prop.168.merged.20miss.rmlowv.rmout.txt", header=T)
+meth.168 <- t(prop.168.20miss.merged[, -c(1)])
+
+#Create the distance matrix from methylation data 
+d.meth.ind.manh = vegdist(meth.168, method = "manhattan", na.rm = TRUE)
+
+#population wide
+#methylation matrix by population excluding hybrid individuals
+prop.pop <- prop.168.20miss.merged %>%
+  dplyr::mutate(mean.E = rowMeans(select(., matches("_E_")), na.rm = TRUE)) %>%
+  dplyr::mutate(mean.G = rowMeans(select(., matches("_G_")), na.rm = TRUE)) %>%
+  dplyr::mutate(mean.Reu = rowMeans(select(., matches("DE_|FI_|CH_")), na.rm = TRUE)) %>%
+  dplyr::mutate(mean.R = rowMeans(select(., matches("RU_13_R")), na.rm = TRUE)) %>%
+  dplyr::mutate(mean.S = rowMeans(select(., matches("_S_")), na.rm = TRUE)) %>%
+  dplyr::mutate(mean.T = rowMeans(select(., matches("_T_")), na.rm = TRUE))  %>%
+  dplyr::mutate(mean.TV = rowMeans(select(., matches("_TV_")), na.rm = TRUE))
+
+meth.pop <- t(prop.pop[, 171:177])
+#create distance matrix
+#manhattan
+d.meth.pop.manhattan = vegdist(meth.pop, method = "manhattan", na.rm = TRUE)
+#eucledian
+d.meth.pop.eucledian = vegdist(meth.pop, method = "euclidean", na.rm = TRUE)
+```
+
+
+##Correlation between FST and PST distances
+See script (/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/2_Genome_Scan/2_correlation_10kb_windows.Rmd) for correlations between pop comparisons. From these results, I will compare them to geographic and genetic distance.
+
+Into this table, I added the geo and gen distances calculated in this script. Then use the 2_correlation_10kb_windows script to run mantel tests.
+```{r}
+#Load in correlation matricies
+#corr_results <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/2_Genome_Scan/2_correlation_10kb_results_dist.txt", header=T)
+
+```
+
+## Geographic distance
+
+Individual and population
+
+```{r pressure, echo=FALSE}
+#geographic distance based on haversine distance (this could also be eucledian, hwoever, haversine takes into acount the sphere of earth)
+lat.lon = data.frame(as.numeric(info$Longitude.approx), as.numeric(info$Latitude.approx))
+geo = distm(lat.lon, fun = distHaversine)
+d.geo.ind.hav = stats::dist(geo)
+
+
+##geographic matrix by population excluding hybrids
+info.pop <- as.data.frame(cbind(info$sample_name, as.numeric(info$Longitude.approx), as.numeric(info$Latitude.approx)))
+##need this to go in same order as gen_light populations: china, egypt, finland, germany,israel, russia, swiss, usa
+info.pop <- info.pop[c(82,11,27,60,35,74,52), c(2:3)]
+info.pop$V2 <- as.numeric(info.pop$V2) 
+info.pop$V3 <- as.numeric(info.pop$V3) 
+row.names(info.pop) <- c("geo.E", "geo.G", "geo.Reu", "geo.Rr", "geo.S",  "geo.T","geo.TV")
+
+geo.pop = distm(info.pop, fun = distHaversine)
+d.geo.pop.hav = as.dist(geo.pop)
+```
+## Ecological distance
+
+Population based distance based on climate data
+
+```{r pressure, echo=FALSE}
+info.climate <- read_xlsx("/dss/dsshome1/lxc0B/ra52qed/gitlab/swallow.projects/scripts/0_sample.lists/NCBI_info_updated_20220727_climate_data.xlsx", sheet = "Sheet7")
+info.climate=info.climate %>%
+  dplyr::slice(match(sample_names$V1, info.climate$sample_name))
+#geographic distance based on haversine distance (this could also be eucledian, hwoever, haversine takes into acount the sphere of earth)
+eco.df = data.frame(as.numeric(info.climate$tavg), as.numeric(info.climate$tmin), as.numeric(info.climate$tmax), as.numeric(info.climate$prcp), as.numeric(info.climate$pres))
+eco = vegdist(x = eco.df, method = "bray",na.rm = TRUE)
+d.eco.ind.bray = stats::dist(eco)
+
+
+##ecological matrix by population
+##need this to go in same order as gen_light populations: china, egypt, finland, germany,israel, russia, swiss, usa
+eco.pop <- eco.df[c(82,11,27,60,35,74,52),]
+row.names(eco.pop) <- c("eco.E", "eco.G", "eco.Reu", "eco.Rr", "eco.S",  "eco.T","eco.TV")
+
+eco.pop = vegdist(x = eco.pop, method = "bray",na.rm = TRUE)
+d.eco.pop.bray = as.dist(eco.pop)
+```
+
+## Genetic distance
+
+First we need to create a gen_light object to get genetic matrix. This can be completed by running /dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/1_Population_Structure/3_Mantel/0_genlight_obj.r. Double check populations due to the few individuals that were switched during wgs sequencing...probably need to remove these
+
+```{r pressure, echo=FALSE}
+#load("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/1_Population_Structure/3_Mantel/0_genlight.85.10miss.RData")
+```
+
+Then we can create the different distance matrix for genetic data. NOTE: THIS STEP TAKES A LARGE AMOUNT OF MEMORY AND COMPUTATIONAL TIME
+
+```{r pressure, echo=FALSE}
+##Individual based genetic matrix
+#gen.mat <- as.matrix(gen_light)
+#d.gen.ind.man <- vegdist(gen.mat, method = "manhattan", na.rm=TRUE)
+
+#save(d.gen.ind.man, file= "/dss/dsshome1/lxc0B/ra52qed/scripts/1.RRBS/8.mantel.test/d.gen.ind.man.10miss.RData")
+#save(d.gen.ind.euc, file= "/dss/dsshome1/lxc0B/ra52qed/scripts/1.RRBS/8.mantel.test/d.gen.ind.euc.10miss.RData")
+
+#load("/dss/dsshome1/lxc0B/ra52qed/scripts/1.RRBS/8.mantel.test/d.gen.ind.man.10miss.RData")
+#load("/dss/dsshome1/lxc0B/ra52qed/scripts/1.RRBS/8.mantel.test/d.gen.ind.euc.10miss.RData")
+
+##Population wide genetic distances
+#Attempt 1 - takes a long time
+#gen.ind <- gl2gi(gen_light)
+#gen.pop <- genind2genpop(gen_light)
+#d.gen.pop.ade <- dist.genpop(gen.pop, method = 1, diag = FALSE, upper = FALSE)
+
+#Attempt 2
+##population genetic distance
+#temp=apply(as.matrix(gen_light),2, tapply, pop(gen_light), function(e) mean(e)/ploidy(gen_light)[1]) 
+#d.gen.pop.manual <- dist(temp)
+
+#save(d.gen.pop.manual, file="/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/1_Population_Structure/3_Mantel/0_genpop_85_10miss.RData")
+
+load("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/1_Population_Structure/3_Mantel/0_genpop_85_10miss.RData")
+
+```
+
+Run Population Mantel Tests
+```{r pressure, echo=FALSE}
+
+#methylation vs geographic by population
+dist.pop <- as.data.frame(t(rbind(d.geo.pop.hav,d.meth.pop.manhattan)))
+#run Mantel test
+meth_geo_pop  = mantel(d.meth.pop.manhattan, d.geo.pop.hav, method = "spearman", permutations = 9999, na.rm = TRUE)
+meth_geo_pop
+
+#meth_gen
+meth_gen_pop  = mantel(d.meth.pop.manhattan, d.gen.pop.manual, method = "spearman", permutations = 9999, na.rm = TRUE)
+meth_gen_pop
+
+#meth_eco
+meth_eco_pop  = mantel(d.meth.pop.manhattan, d.eco.pop.bray, method = "spearman", permutations = 9999, na.rm = TRUE)
+meth_eco_pop
+
+#geo_gen
+geo_gen_pop  = mantel(d.gen.pop.manual, d.geo.pop.hav, method = "spearman", permutations = 9999, na.rm = TRUE)
+geo_gen_pop
+
+#eco_gen
+eco_gen_pop  = mantel(d.gen.pop.manual, d.eco.pop.bray, method = "spearman", permutations = 9999, na.rm = TRUE)
+eco_gen_pop
+
+meth_geo_rm_gen <- mantel.partial(d.meth.pop.manhattan, d.geo.pop.hav, d.gen.pop.manual, method = "spearman", permutations = 9999, na.rm = TRUE)
+meth_geo_rm_gen
+
+meth_eco_rm_gen <- mantel.partial(d.meth.pop.manhattan, d.eco.pop.bray, d.gen.pop.manual, method = "spearman", permutations = 9999, na.rm = TRUE)
+meth_eco_rm_gen
+
+meth_gen_rm_geo <- mantel.partial(d.meth.pop.manhattan, d.gen.pop.manual, d.geo.pop.hav, method = "spearman", permutations = 9999, na.rm = TRUE)
+meth_gen_rm_geo
+
+meth_gen_rm_eco <- mantel.partial(d.meth.pop.manhattan, d.gen.pop.manual, d.eco.pop.bray, method = "spearman", permutations = 9999, na.rm = TRUE)
+meth_gen_rm_eco
+
+
+#plot
+ggplot(dist.pop, aes(x=d.meth.pop.manhattan, y=d.geo.pop.hav)) + 
+  geom_smooth(method="lm")+
+  geom_point(color="grey66")+
+  xlab("methylation distance")+
+  ylab("geographic distance")+
+  theme_minimal()
+
+#plot
+ggplot(dist.pop, aes(x=d.meth.pop.manhattan, y=d.gen.pop.manual)) + 
+  geom_smooth(method="lm")+
+  geom_point(color="grey66")+
+  xlab("methylation distance")+
+  ylab("genetic distance")+
+  theme_minimal()
+
+#plot
+ggplot(dist.pop, aes(x=d.gen.pop.manual, y=d.geo.pop.hav)) + 
+  geom_smooth(method="lm")+
+  geom_point(color="grey66")+
+  xlab("geographic distance")+
+  ylab("genetic distance")+
+  theme_minimal()
+
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
