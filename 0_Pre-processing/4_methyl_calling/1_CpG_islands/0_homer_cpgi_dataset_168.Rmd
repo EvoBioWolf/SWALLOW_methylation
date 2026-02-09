@@ -1,0 +1,542 @@
+---
+title: "Defining loci in CpGislands"
+author: "Sarah Mueller"
+date: "2025"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+### Libraries
+.libPaths(c(.libPaths(),"/dss/dsshome1/lxc0B/ra52qed/R/x86_64-pc-linux-gnu-library/4.2"))
+
+library(vegan)
+library(plyr)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(broom)
+library(readxl)
+library(ggrepel)
+#library(ggpubr)
+library(purrr)
+library(wesanderson)
+library(readr)
+```
+
+## Defining CpG islands from our CpG loci
+
+There are several ways to look at CpG loci and define summary statistics. One option is to look at CpG islands as one unit instead of individual CpG loci. Here, we can look at how intercorrelated the CpG loci are to each other within CpG islands and also what the average methylation across CpG islands is. We can then use the scripts for downstream analysis (DMR detection, PST, PCA,RDA) on the CpG islands and see if this provides us with different information than what we see using only CpG loci. So, the end goal here is to have a dataset that looks similar to prop.168.0miss, but instead of site.id we have a cpgi.id (cpgisland.id).
+
+## Creating CpGi dataset
+
+First, in order to get a file that includes all the called CpG loci and the corresponding CpG islands I used bedtools, see script (/dss/dsshome1/lxc0B/ra52qed/gitlab/swallow.projects/scripts/1.RRBS/4.4.genomic.regions/0_cpgisland_cpgloci_overlap/1_bedtools.overlap.sh)
+
+##Create CpGi dataset
+
+Now I want to use this file to create a CpGi id so we can later merge all CpG loci that fall in one CpG island.
+
+```{r message=FALSE, warning=FALSE}
+#load bedtools output
+cpgi.20miss <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_genome_files/3_CpG_genomic_regions/2_bedtools/0_cpgisland_cpgloci_overlap/cpgisland_cpgloci_output.168.20miss.update.bed", header=F)
+
+#create column names
+colnames(cpgi.20miss) <- c("chrom.cpgl", "pos.cpgl", "pos1.cpgl", "chrom", "start", "end", "extra") 
+
+#merge the chrom, start and end columns into 1 cpgi id column
+cpgi.20miss <- cpgi.20miss %>%
+                      tidyr::unite(cpgi.id, chrom, start, end, sep = '_') %>%
+                      tidyr::unite(site.id, chrom.cpgl, pos.cpgl, sep = '_') 
+
+cpgi.20miss <- cpgi.20miss %>%
+                      dplyr::select("site.id", "cpgi.id")
+
+```
+
+Now I want to also merge the shores and shelves data, to have one dataframe with all the different regions included
+
+```{r, message=FALSE}
+
+#SHORES
+#load bedtools output
+cpg.shore.20miss <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_genome_files/3_CpG_genomic_regions/2_bedtools/0_cpgi_shores_shelves_overlap/cpgi.shores.168.20miss.update.bed", header=F)
+
+#create column names
+colnames(cpg.shore.20miss) <- c("chrom.cpgl", "pos.cpgl", "pos1.cpgl", "chrom", "start", "end") 
+
+#merge the chrom, start and end columns into 1 cpgi id column
+cpg.shore.20miss <- cpg.shore.20miss %>%
+                      tidyr::unite(cpg.shore.id, chrom, start, end, sep = '_') %>%
+                      tidyr::unite(site.id, chrom.cpgl, pos.cpgl, sep = '_') 
+
+cpg.shore.20miss <- cpg.shore.20miss %>%
+                      dplyr::select("site.id", "cpg.shore.id")
+
+```
+
+Now I want to merge these cpgi, shores and shelves with the prop.168.20miss dataset and look into how intercorrelated the results are between loci within cpg islands,and how many loci lie outside of cpg islands.
+```{r message=FALSE, warning=FALSE}
+#load sample names
+sample_names <- read.table(file = "/dss/dsshome1/lxc0B/ra52qed/gitlab/swallow.projects/scripts/0_sample.lists/sample.names.168.txt")
+
+#load methylation data
+prop.20miss <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_Pre-processing/4_methyl_calling/0_all_sites/168.20miss/prop.168.merged.20miss.txt", header=T)
+
+##load homer input 
+homer.output.20miss <- read.delim("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_genome_files/3_CpG_genomic_regions/1_homer/homer.output.168.merged.20miss.txt")
+colnames(homer.output.20miss)[1] <- "PeakID"
+
+#join the 2 dataframes keeping entries from both tables
+cpgi.prop.20miss <- full_join(cpgi.20miss, prop.20miss, by = "site.id")
+cpgi.prop.20miss <- full_join(cpg.shore.20miss, cpgi.prop.20miss, by = "site.id")
+#cpgi.prop.20miss <- full_join(cpg.shelf.20miss, cpgi.prop.20miss, by = "site.id")
+homer.cpgi.prop.20miss <- left_join(cpgi.prop.20miss, homer.output.20miss, by = c("site.id" = "PeakID"))
+
+homer.cpgi.prop.20miss <- homer.cpgi.prop.20miss[rowSums(is.na(homer.cpgi.prop.20miss[, 5:90])) != ncol(homer.cpgi.prop.20miss[, 5:90]), ]
+
+homer.cpgi.prop.20miss <- homer.cpgi.prop.20miss %>%
+  separate(Annotation, into = c("Annotation", "extra"), sep = "\\(", remove = FALSE)
+
+homer.cpgi.prop.20miss <- homer.cpgi.prop.20miss %>%
+  mutate(category = case_when(
+    #!is.na(cpg.shelf.id) ~ "shelf",
+    !is.na(cpg.shore.id) ~ "shore",
+    !is.na(cpgi.id) ~ "island",
+    TRUE ~ "opensea"
+  ))
+
+homer.cpgi.prop.20miss <- homer.cpgi.prop.20miss %>%
+  mutate(category = paste(category, Annotation, sep = "_")) %>%
+  mutate(loci.id = site.id)
+
+
+homer.cpgi.prop.20miss <- homer.cpgi.prop.20miss %>%
+  #mutate(region.id = coalesce(cpg.shelf.id, cpg.shore.id, cpgi.id, loci.id))
+  mutate(region.id = coalesce(cpg.shore.id, cpgi.id, loci.id))
+```
+
+Determine how many disagreements there are between homer annotations across all islands/loci
+
+```{r}
+homer.disagree <- homer.cpgi.prop.20miss %>%
+                        group_by(region.id) %>%
+                        # Count the number of unique regions for each cpgi_id
+                        dplyr::summarise(number_of_regions = n_distinct(Annotation))
+
+summary(homer.disagree$number_of_regions)
+proportion <- sum(homer.disagree$number_of_regions > 2) / nrow(homer.disagree)
+
+homer.disagree.detail <- homer.cpgi.prop.20miss %>%
+                              group_by(region.id) %>%
+                              # Count the number of unique regions for each cpgi_id
+                              dplyr::summarise(number_of_regions = n_distinct(Detailed.Annotation))
+
+summary(homer.disagree.detail$number_of_regions)
+```
+
+##CpG islands
+I want to average loci within CpG islands into 1 values and retain the homer annotation that is the most common within each CpG island. During this I also want to see how well these annotations summarise the CpG islands. This will result in one methylation proportion averaged from at least 3 CpG sites per individual and the annotation that is the most common from that region.
+
+```{r warning=FALSE, message=FALSE}
+homer_subset <- homer.cpgi.prop.20miss %>%
+        dplyr::select(c(,172:193))
+
+cpgi_values <- homer.cpgi.prop.20miss %>%
+  filter(!is.na(cpgi.id)) %>%
+  group_by(cpgi.id) %>%
+  dplyr::summarise(n_cpgs = n(), across(contains("_ADL_"), mean, na.rm=TRUE))
+
+#Summary statistics on how many loci are on average in one CpGi 
+summary(cpgi_values$n_cpgs)
+sum(cpgi_values$n_cpgs <= 2)
+
+##Keep only islands with 3 or more values being averaged
+cpgi_values <- cpgi_values %>%
+      filter(n_cpgs >= 3)
+
+#Get total number of islands (for later counting how many have conflictin annotations)
+count_islands <- cpgi_values %>%
+  group_by(cpgi.id) %>%
+  nrow()
+
+#Merge to homer_subset to get functional region annotation (this gives one per loci, so it again increases the # to the number of loci)
+cpgi_values <- cpgi_values %>%
+              left_join(homer_subset, by=c("cpgi.id" = "region.id"))
+
+#check how many sites have more than 1 annotation
+count_annotations <- cpgi_values %>%
+  group_by(cpgi.id) %>%
+  dplyr::summarise(n_unique_annotations = n_distinct(Annotation)) %>%
+  filter(n_unique_annotations > 1) %>%
+  nrow()
+
+##35% of islands have more than 1 annotation
+
+#I want to see which annotations most commonly show up together
+#First, get a list of cpgi.id's that have more than one unique annotation
+multiple_annotation_ids <- cpgi_values %>%
+  group_by(cpgi.id) %>%
+  dplyr::filter(n_distinct(Annotation) > 1) %>%
+  pull(cpgi.id) %>%
+  unique()
+
+#Filter the original data and find all pairs of annotations
+annotation_lists <- cpgi_values %>%
+  dplyr::filter(cpgi.id %in% multiple_annotation_ids) %>%
+  group_by(cpgi.id) %>%
+  dplyr::summarise(all_annotations = list(unique(Annotation))) %>%
+  ungroup()
+
+#count number of annotations
+annotation_counts <- annotation_lists %>%
+  mutate(n_annotations = lengths(all_annotations))
+summary(annotation_counts$n_annotations)
+
+#Now I want to filter the cpgi_values dataframe to keep only one entry per CpGi. This should be the entry that has the most frequent homer annotation as well.
+cpgi_values_distinct <- cpgi_values %>%
+  dplyr::group_by(cpgi.id, Annotation) %>%
+  #Add a new column 'n' that counts how many times each annotation appears within each cpgi.id
+  dplyr::mutate(n = n()) %>%
+  dplyr::ungroup() %>%
+  #Group by only the cpgi.id to find the maximum count for each region.
+  dplyr::group_by(cpgi.id) %>%
+  #Arrange by the count 'n' in descending order.
+  dplyr::arrange(desc(n), .by_group = TRUE) %>%
+  #Keep only the first row within each group, which will be the one with the highest count.
+  dplyr::slice_head(n = 1) 
+  
+cpgi_values_distinct <- cpgi_values_distinct %>%
+  mutate(prop.annotation = n/n_cpgs)
+
+#Get a look at how well these annotations represent the overall annotations within the CpG island
+summary(cpgi_values_distinct$prop.annotation)
+
+#    Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+# 0.2852  0.7778  1.0000  0.8881  1.0000  1.0000 
+
+##how many loci are cpg islands based on
+summary(cpgi_values_distinct$n_cpgs)
+
+#Re-run directly on the cpgi_values dataframe for a clean version
+cpgi_values <- cpgi_values %>%
+  dplyr::group_by(cpgi.id, Annotation) %>%
+  dplyr::mutate(n = n()) %>%
+  dplyr::ungroup() %>%
+  dplyr::group_by(cpgi.id) %>%
+  dplyr::arrange(desc(n), .by_group = TRUE) %>%
+  dplyr::slice_head(n = 1) %>%
+  dplyr::select(-n)
+
+colnames(cpgi_values)[1] <- "region.id"
+```
+
+##CpG island flanking regions (shores 0-2kb from CpG island)
+```{r}
+shore_values <- homer.cpgi.prop.20miss %>%
+  filter(!is.na(cpg.shore.id)) %>%
+  group_by(cpg.shore.id) %>%
+  dplyr::summarise(n_cpgs = n(), across(contains("_ADL_"), mean,  na.rm=TRUE))
+
+#Summary statistics on how many loci are on average in one CpGi 
+summary(shore_values$n_cpgs)
+sum(shore_values$n_cpgs <= 2)
+
+##Keep only islands with 3 or more values being averaged
+shore_values <- shore_values %>%
+      filter(n_cpgs >= 3)
+
+#Get total number of islands (for later counting how many have conflictin annotations)
+count_shores <- shore_values %>%
+  group_by(cpg.shore.id) %>%
+  nrow()
+
+#Merge to homer_subset to get functional region annotation (this gives one per loci, so it again increases the # to the number of loci)
+shore_values <- shore_values %>%
+              left_join(homer_subset, by=c("cpg.shore.id" = "region.id"))
+
+#check how many sites have more than 1 annotation
+count_shore_annotations <- shore_values %>%
+  dplyr::group_by(cpg.shore.id) %>%
+  dplyr::summarise(n_unique_annotations = n_distinct(Annotation)) %>%
+  dplyr::filter(n_unique_annotations > 1) %>%
+  nrow()
+
+##22% of shores have more than 1 annotation
+
+#I want to see which annotations most commonly show up together
+#First, get a list of cpgi.shore.id's that have more than one unique annotation
+shore_annotation_ids <- shore_values %>%
+  dplyr::group_by(cpg.shore.id) %>%
+  dplyr::filter(n_distinct(Annotation) > 1) %>%
+  pull(cpg.shore.id) %>%
+  unique()
+
+#Filter the original data and find all pairs of annotations
+annotation_shore_lists <- shore_values %>%
+  dplyr::filter(cpg.shore.id %in% shore_annotation_ids) %>%
+  dplyr::group_by(cpg.shore.id) %>%
+  dplyr::summarise(all_annotations = list(unique(Annotation))) %>%
+  dplyr::ungroup()
+
+#count number of annotations
+annotation_shore_counts <- annotation_shore_lists %>%
+  dplyr::mutate(n_annotations = lengths(all_annotations))
+summary(annotation_counts$n_annotations)
+
+#The majority only have 2 conflicting annotations
+
+#Now I want to filter the shore_values dataframe to keep only one entry per CpGi. This should be the entry that has the most frequent homer annotation as well.
+shore_values_distinct <- shore_values %>%
+  dplyr::group_by(cpg.shore.id, Annotation) %>%
+  #Add a new column 'n' that counts how many times each annotation appears within each cpgi.shore.id
+  dplyr::mutate(n = n()) %>%
+  dplyr::ungroup() %>%
+  #Group by only the cpgi.shore.id to find the maximum count for each region.
+  dplyr::group_by(cpg.shore.id) %>%
+  #Arrange by the count 'n' in descending order.
+  dplyr::arrange(desc(n), .by_group = TRUE) %>%
+  #Keep only the first row within each group, which will be the one with the highest count.
+  dplyr::slice_head(n = 1) 
+  
+shore_values_distinct <- shore_values_distinct %>%
+  dplyr::mutate(prop.annotation = n/n_cpgs)
+
+#Get a look at how well these annotations represent the overall annotations within the CpG island
+summary(shore_values_distinct$prop.annotation)
+
+#   Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+# 0.3103  1.0000  1.0000  0.9309  1.0000  1.0000 
+
+##how many loci are cpg shores based on
+summary(shore_values_distinct$n_cpgs)
+
+#Re-run directly on the cpgi_values dataframe for a clean version
+shore_values <- shore_values %>%
+   dplyr::group_by(cpg.shore.id, Annotation) %>%
+   dplyr::mutate(n = n()) %>%
+   dplyr::ungroup() %>%
+   dplyr::group_by(cpg.shore.id) %>%
+   dplyr::arrange(desc(n), .by_group = TRUE) %>%
+   dplyr::slice_head(n = 1) %>%
+   dplyr::select(-n)
+
+colnames(shore_values)[1] <- "region.id"
+```
+
+##non-CpG island loci
+Now I have to deal with all of the loci outside of CpG islands. 
+I want to keep these as loci, not regions
+
+However, I also want to remove any CpG sites with showed hyper- or hypo- methylation as well as outliers. For this I wil load in the dataset without outliers and merge this to the homer dataset.
+
+First, for all loci
+```{r}
+open_sea_values <- homer.cpgi.prop.20miss[,1:193] %>%
+               dplyr::filter(is.na(cpgi.id)) %>%
+               dplyr::filter(is.na(cpg.shore.id)) 
+
+#Keep only unique entries based on the column 'region.id'
+open_sea_values <- open_sea_values %>% distinct(region.id, .keep_all = TRUE)
+
+#I need to make this have the same columns as cpgi_ and shores_values, therefore I need to add a n_cpgs column, which in this case is 1, because they are all individual loci, and I need to remove the cpgi.id and cpg.shore.id columns
+open_sea_values <- open_sea_values %>% 
+  mutate(n_cpgs = 1) %>%
+  dplyr::select(-"region.id", -"cpgi.id", -"cpg.shore.id") %>%
+  dplyr::select(site.id, n_cpgs, everything())
+
+colnames(open_sea_values)[1] <- "region.id"
+
+cat.prop.20miss <- rbind(cpgi_values, shore_values, open_sea_values)
+
+```
+
+Next, load in filtered loci.
+
+Here, I want to only keep loci from the prop.filtered dataframe because these are the ones filtered for hypo and hyper methylation, as well as singular points removed due to outliers. To do this I will first join and then remove the old values from opensea 
+
+```{r}
+prop.filtered.20miss <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_Pre-processing/4_methyl_calling/0_all_sites/168.20miss/prop.168.merged.20miss.rmlowv.rmout.txt", header=T)
+
+# Perform the left join
+combined_data <- inner_join(open_sea_values, prop.filtered.20miss, by = c("region.id" = "site.id"), suffix = c(".original", ".new"))
+
+# Get a list of the columns to replace
+me_columns <- names(open_sea_values) %>% str_subset("^ME_")
+
+# Replace the columns
+for (col_name in me_columns) {
+  original_col <- paste0(col_name, ".original")
+  new_col <- paste0(col_name, ".new")
+
+  # Replace the original column's values with the new column's values
+  combined_data[[original_col]] <- combined_data[[new_col]]
+}
+
+#Clean up by removing the ".new" columns and renaming the original back
+opensea_values_clean <- combined_data %>%
+   dplyr::select(region.id, n_cpgs, ends_with(".new"), everything(), -ends_with(".original"), -proportion.ave) %>%
+   dplyr::rename_with(~str_remove(., ".new"), ends_with(".new"))
+
+
+cat.prop.20miss.clean <- rbind(cpgi_values, shore_values, opensea_values_clean)
+```
+
+
+I have run all of this on all CpG sites (n = 938,186). So now, I want to explore a bit of if there are still hyper- and hypo- methylated loci or islands/flanks that should be removed before downstream analysis.
+
+```{r}
+#Get average methylation across all individuals
+methylation.averages <- cat.prop.20miss.clean %>%
+   dplyr::rowwise() %>%
+   dplyr::mutate(
+    proportion.ave = mean(c_across(contains("_ADL_")), na.rm = TRUE),
+    proportion.sd = sd(c_across(contains("_ADL_")), na.rm = TRUE)
+  ) %>%
+   dplyr::ungroup()
+
+#for cpgi
+meth.ave.cpgi <- methylation.averages %>%
+  filter(grepl("^island_", category))
+summary(meth.ave.cpgi$proportion.ave)
+
+#total sites histogram
+ggplot(meth.ave.cpgi, aes(x = proportion.ave)) +
+  geom_histogram(binwidth = 0.05, fill = "#009193", color = "black", alpha = 0.7) +
+  labs(title = "Average Methylation Proportion across Individuals (CpGislands)",
+       x = "Average Methylation Proportion",
+       y = "Frequency") +
+  theme_minimal(base_size = 12) +  # Set a base size for text
+  theme(panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank(),
+    plot.title = element_text(hjust = 0.5, size = 12, face = "bold")
+  )
+
+#for flanking regions
+meth.ave.shores <- methylation.averages %>%
+  filter(grepl("^shore_", category))
+summary(meth.ave.shores$proportion.ave)
+
+#total sites histogram
+ggplot(meth.ave.shores, aes(x = proportion.ave)) +
+  geom_histogram(binwidth = 0.05, fill = "#009193", color = "black", alpha = 0.7) +
+  labs(title = "Average Methylation Proportion across Individuals (CpGislands)",
+       x = "Average Methylation Proportion",
+       y = "Frequency") +
+  theme_minimal(base_size = 12) +  # Set a base size for text
+  theme(panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank(),
+    plot.title = element_text(hjust = 0.5, size = 12, face = "bold")
+  )
+
+#for non-CpGi loci
+meth.ave.open <- methylation.averages %>%
+  filter(grepl("^opensea_", category))
+summary(meth.ave.open$proportion.ave)
+
+#total sites histogram
+ggplot(meth.ave.open, aes(x = proportion.ave)) +
+  geom_histogram(binwidth = 0.05, fill = "#009193", color = "black", alpha = 0.7) +
+  labs(title = "Average Methylation Proportion across Individuals (CpGislands)",
+       x = "Average Methylation Proportion",
+       y = "Frequency") +
+  theme_minimal(base_size = 12) +  # Set a base size for text
+  theme(panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank(),
+    plot.title = element_text(hjust = 0.5, size = 12, face = "bold")
+  )
+
+```
+##Filtering
+
+Then let's filter CpG islands and flanking regions, as well as non-CpGi loci, removing hypo- and hyper- methylated regions/loci
+
+```{r}
+#make df with filtered out sites, to run some plots on later
+filtered_out <- methylation.averages %>%
+        filter(proportion.ave < 0.1 | proportion.ave > 0.9)
+
+summary(as.factor(filtered_out$Annotation))
+summary(filtered_out$n_cpgs)
+summary(as.factor(filtered_out$category))
+
+#filter out hypo- (<y10%, hyper >90%,)
+methylation.averages.filtered <- methylation.averages %>%                       
+                        rowwise %>%
+                        filter(proportion.ave > 0.1) %>%
+                        filter(proportion.ave < 0.9)
+```
+
+Save the cpgi, flanks and remaining loci for analysis.
+
+```{r}
+methylation.averages.filtered <- methylation.averages.filtered %>%
+  dplyr::select(-proportion.ave, -proportion.sd)
+
+write_delim(methylation.averages.filtered, file="/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_Pre-processing/4_methyl_calling/1_CpG_islands/168.20miss/homer.cpgi.prop.168.merged.20miss.rmlowv.rmout.txt", delim="\t", quote_escape = "double")  
+```
+
+In the only CpG loci dataset (where all CpG sites are treated independently regardless of island, flanking or non-CpGi)
+
+```{r}
+# Perform the left join
+combined_cpgs <- inner_join(homer.cpgi.prop.20miss, prop.filtered.20miss, by = c("site.id"), suffix = c(".original", ".new"))
+
+# Get a list of the columns to replace
+me_columns <- names(homer.cpgi.prop.20miss) %>% str_subset("^ME_")
+
+# Replace the columns
+for (col_name in me_columns) {
+  original_col <- paste0(col_name, ".original")
+  new_col <- paste0(col_name, ".new")
+
+  # Replace the original column's values with the new column's values
+  combined_cpgs[[original_col]] <- combined_cpgs[[new_col]]
+}
+
+#Clean up by removing the ".new" columns and renaming the original back
+combined_cpgs_clean <- combined_cpgs %>%
+  dplyr::select(site.id, region.id, ends_with(".new"), everything(), -ends_with(".original"), -proportion.ave, -cpg.shore.id, -cpgi.id) %>%
+  dplyr::rename_with(~str_remove(., ".new"), ends_with(".new"))
+```
+
+save output
+```{r}
+# For homer.cpgi.prop.168.20miss
+write_delim(combined_cpgs_clean, file="/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_Pre-processing/4_methyl_calling/1_CpG_islands/168.20miss/homer.loci.prop.168.merged.20miss.rmlowv.rmout.txt", delim="\t", quote_escape = "double")  
+```
+
+Summaries of number of counts for manuscript
+
+```{r}
+# Get the summary as a named vector
+category_summary <- summary(as.factor(combined_cpgs_clean$category))
+
+# Convert the named vector to a data frame
+category_df <- as.data.frame(category_summary)
+
+# Rename the column for clarity
+names(category_df) <- "count"
+
+sum(category_df$count)
+
+write.table(category_df, file= "/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_Pre-processing/4_methyl_calling/1_CpG_islands/0_homer_loci_join_summary_168.txt", quote=F, sep = "\t")
+
+# Get the summary as a named vector
+category_cpgi <- summary(as.factor(methylation.averages.filtered$category))
+
+# Convert the named vector to a data frame
+category_cpgi <- as.data.frame(category_cpgi)
+
+# Rename the column for clarity
+names(category_cpgi) <- "count"
+
+sum(category_cpgi$count)
+
+write.table(category_cpgi, file= "/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_Pre-processing/4_methyl_calling/1_CpG_islands/0_homer_cpgi_join_summary_168.txt", quote=F, sep = "\t")
+```
+

@@ -1,0 +1,189 @@
+##Using DSS to identify age associated sites and sex associated sites
+##Sarah A. Mueller
+#16.09.22 started
+
+```{r setup, message=FALSE, warning=FALSE}
+.libPaths(c(.libPaths(),"/dss/dsshome1/lxc0B/ra52qed/R/x86_64-pc-linux-gnu-library/4.2"))
+
+library(DSS)
+require(bsseq)
+#library(methylKit)
+library(tidyr)
+library(dplyr)
+library(maditr)
+
+setwd("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_Pre-processing/3_age_evaluation/")
+
+#load BSseq obj created with previous script
+load("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_Pre-processing/3_age_evaluation/2_DSS/age.17.dmrs.RData")
+```
+
+In this script, I want to load the Bsseq object created using 1_DSS_sex_obj.R,which creates the Bsseq object and then we can perform the differential methylation analysis which will identify loci significantly associated to sex. These can then later be removed from downstream analysis to try to remove the extra impact of sex on methylation. First I want to run on a randomized dataset (so I will randomize the sex variable to see the distribtion of p-values and choose an appropriate threshold.)
+
+Attempt to run 100 permutations:
+
+```{r, message=FALSE, warning=FALSE}
+set.seed(123)
+
+# Read sample names
+sample_names <- read.table("/dss/dsshome1/lxc0B/ra52qed/gitlab/swallow.projects/scripts/0_sample.lists/sample.names.17.txt")
+
+# Create a vector with male and female
+age_vector <- rep(c('CHK', 'YRL', 'ADL'), each = 6)
+age_vector <- age_vector[1:17]
+# Initialize a list to store p-values
+all_pvals <- vector("list", 100)
+
+for (i in 1:100) {
+  # Shuffle the vector for randomization
+  age_random <- sample(age_vector)
+  # Create a dataframe
+  age_random <- data.frame(age_random = age_random)
+  age_random$age_random <- as.factor(age_random$age_random)
+  
+  # Create design with sample names
+  design <- cbind(sample_names, age_random)
+  
+  # Define the design formula
+  X = model.matrix(~age_random, design)
+  
+  # Fit the linear model
+  DMLfit = DMLfit.multiFactor(BSobj, design=design, formula=~age_random)
+  
+  # Collect p-values for each variable
+  vars <- colnames(DMLfit$X)[-1]
+  dmc.df <- NULL
+  dmr.df <- NULL
+  for (vari in vars) {
+    dats <- DMLtest.multiFactor(DMLfit, coef=vari)
+    dats$var <- vari
+    dmc.df <- rbind(dmc.df, dats)
+    dmr <- callDMR(dats, minCG=3, p.threshold=0.01, minlen=50)
+    dmr$var <- vari
+    dmr.df <- rbind(dmr.df, dmr)
+  }
+  
+  # Store the p-values from this permutation
+  all_pvals[[i]] <- dmc.df$pvals
+}
+
+# Combine all p-values into a single vector
+all_pvals_combined <- unlist(all_pvals)
+
+# Calculate the 95th percentile
+percentile_5 <- quantile(all_pvals_combined, 0.05)
+min <- summary(all_pvals_combined)
+# Print the 95th percentile
+print(percentile_5)
+
+write.table(all_pvals_combined,file="/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_Pre-processing/3_age_evaluation/all.pvals.txt", row.names = F, quote=F, sep="\t")
+
+
+
+```
+
+```{r, message=FALSE, warning=FALSE}
+#first load in counts from the Dataset 3, because this should include all sites in Dataset1 &2 so we only have to do the analysis once to get sites to clean from all three datasets
+#sample names
+sample_names <- read.table("/dss/dsshome1/lxc0B/ra52qed/gitlab/swallow.projects/scripts/0_sample.lists/sample.names.17.txt")
+
+N=17
+
+load("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_Pre-processing/3_age_evaluation/2_DSS/age.17.dmrs.RData")
+
+#get explanatory variables set
+info <- read_xlsx("/dss/dsshome1/lxc0B/ra52qed/gitlab/swallow.projects/scripts/0_sample.lists/NCBI_info_updated_20220727.xlsx")
+#remove all individuals not used for this analysis
+info=info %>%
+  dplyr::slice(match(sample_names$V1, info$sample_name))
+##SELECT ALL COLUMNS THAT WILL BE USED AS POSSIBLE VARIABLES...need to make sure this is correct, are there any others we should use?
+info <- info %>%
+  dplyr::select("isolate", "Year", "dev_stage", "sex.rrbs", "longitudinal.sample.true")
+#convert to the correct format for each variable
+info$Year = as.factor(info$Year)
+info$isolate = as.factor(info$isolate)
+info$sex.rrbs = as.factor(info$sex.rrbs)
+info$longitudinal.sample.true = as.factor(info$longitudinal.sample.true)
+info$dev_stage = as.factor(info$dev_stage)
+#create design with sample names
+design <- cbind(sample_names, info)
+
+#define the design formula (this tests additive effects (so essentially the different levels within each covariate). To only test covariate use Stage,Sex)
+X = model.matrix(~sex.rrbs + dev_stage, design)
+X
+#fit the linear model
+DMLfit = DMLfit.multiFactor(BSobj, design=design, formula=~sex.rrbs)
+
+vars <- colnames(DMLfit$X)[-1]
+dmc.df <- NULL
+dmr.df <- NULL
+for (vari in vars) {
+  dats <- DMLtest.multiFactor(DMLfit,coef=vari)
+  dats$var <- vari
+  dmc.df <- rbind(dmc.df,dats)
+  dmr <- callDMR(dats,minCG=3,p.threshold=0.001,minlen=50)
+  dmr$var <- vari
+  dmr.df <- rbind(dmr.df,dmr)
+}
+
+#Save raw output files
+write.table(dmc.df,file='3_dmc.17.20miss.ageeval.txt',quote=F,sep='\t',row.names=F)
+write.table(dmr.df,file='3_dmr.17.20miss.ageeval.txt',quote=F,sep='\t',row.names=F)
+```
+
+Now we have run the analysis, which did not identify any sites significantly associated to sex when taking the FDR correction into account, however, there were 13 DMRs identified. 
+
+```{r, message=FALSE, warning=FALSE}
+#
+#Reformat nicely
+colnames(dmc.df) <- c("chr", "start", "stat", "pvalue", "fdrs", "var")
+d1 <- dmc.df[,c('chr','start','fdrs','var')]
+d2 <- dcast(dmc.df, chr + start ~ var, value.var=c('fdrs'))
+d2$site <- paste0(d2$chr,'_',d2$start)
+d2 <- as.data.frame(d2)
+dp <- d2[!grepl('chr|start|site',names(d2))]
+names(dp) <- paste0('fdrs_',names(dp))
+d3 <- cbind(d2[grepl('chr|start|site',names(d2))],dp)
+
+##plotting
+#get data into plotable format
+data_cum <- d3 %>% 
+  group_by(chr) %>% 
+  dplyr::summarise(max_bp = max(start)) %>% 
+  mutate(bp_add = lag(cumsum(max_bp), default = 0))
+
+d4 <- data_cum %>% 
+  inner_join(d3, by = "chr") 
+
+d4 <- d4 %>% 
+  mutate(bp_cum = start + bp_add)
+
+axis_set <- d4 %>% 
+  group_by(chr) %>% 
+  dplyr::summarize(center = mean(bp_cum))
+
+#defined this as 0.05/N, where N is the number of tests performed (522070)
+sig <- 0.044
+
+
+#sex
+manhplot <- ggplot(d4, aes(x = bp_cum, y = -log10(fdrs_sex.rrbsmale), 
+                                  color = as.factor(chr), size = -log10(fdrs_sex.rrbsmale))) +
+  geom_hline(yintercept = -log10(sig), color = "grey40", linetype = "dashed") + 
+  geom_point(alpha = 0.75) +
+  scale_x_continuous(label = axis_set$chr, breaks = axis_set$center) +
+  scale_y_continuous(expand = c(0,0), limits = c(0, 15)) +
+  scale_color_manual(values = rep(c("#276FBF", "#183059"), unique(length(axis_set$chr)))) +
+  scale_size_continuous(range = c(0.5,3)) +
+  labs(x = NULL, 
+       y = "-log<sub>10</sub>(p)") + 
+  theme_minimal() +
+  theme( 
+    legend.position = "none",
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    axis.title.y = element_blank(),
+    axis.text.x = element_text(angle = 60, size = 8, vjust = 0.5))
+
+manhplot
+```

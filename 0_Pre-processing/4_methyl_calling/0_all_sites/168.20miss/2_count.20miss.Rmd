@@ -1,0 +1,247 @@
+---
+title: "Methylkit.unite.filter"
+author: "Sarah Mueller"
+date: "2025-final"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+##directory for libraries
+.libPaths(c(.libPaths(),"/dss/dsshome1/lxc0B/ra52qed/R/x86_64-pc-linux-gnu-library/4.2"))
+
+#Libraries
+library(vegan)
+library(viridis)
+library(ggplot2, lib="/dss/dsshome1/lxc0B/ra52qed/R/x86_64-pc-linux-gnu-library/4.2")
+library(plyr)
+library(dplyr)
+library(tidyr)
+library(broom)
+library(readxl)
+library(cluster)
+library(ape)
+library(ggrepel)
+library(lme4)
+library(data.table)
+library(emmeans)
+library(outliers)
+library(car)
+```
+
+Essentially this script begins from the united methylkit object.
+
+From there, I extract it to a dataframe and then create a counts file (this includes only the methylated read count) and then a table of proportion of methylated reads.
+
+The sample names file just includes one sample name per line in the order they show up in in the methylkit object. I then add ME (stands for methylated), UN (stands for unmethylated), and TO (stands for total read count)
+
+```{r, message=FALSE, warning=FALSE}
+setwd("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_Pre-processing/4_methyl_calling/0_all_sites/168.20miss/")
+#sample names
+sample_names <- read.table("/dss/dsshome1/lxc0B/ra52qed/gitlab/swallow.projects/scripts/0_sample.lists/sample.names.168.txt")
+#assign meth, total and unmethylated to sample names
+sample_names <- cbind(sample_names, sample_names, sample_names)
+colnames(sample_names) <- c("ME", "TO", "UN")
+sample_names$ME <- sub("^", "ME_", sample_names$ME)
+sample_names$UN <- sub("^", "UN_", sample_names$UN)
+sample_names$TO <- sub("^", "TO_", sample_names$TO)
+
+#sample size
+N =168
+
+##load methylation data
+meth.168.20miss <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_Pre-processing/4_methyl_calling/0_all_sites/168.20miss/meth.168.merged.20miss.txt", header=T)
+```
+
+I want to have a dataframe with the sample names and methylation data, as a proportion and counts of methylation.
+
+```{r, message=FALSE, warning=FALSE}
+#grab methylation data
+meth_basic_stat <- meth.168.20miss
+#meth_basic_stat <- methylKit::getData(meth.168.0miss)
+##get proportion data by taking number of methylated/total coverage
+proportion_basic_stat <- (meth_basic_stat[ , c(unique(c(seq(6, ncol(meth_basic_stat), 3))))]/meth_basic_stat[ , c(unique(c(seq(5, ncol(meth_basic_stat), 3))))])
+#change names to sample names for easy identification
+colnames(proportion_basic_stat) <- sample_names[,1]
+meth_basic_stat<- meth_basic_stat %>%
+  tidyr::unite(site.id, chr:start)
+rownames(proportion_basic_stat) <- meth_basic_stat[,1]
+
+#move site.id to first column
+proportion_basic_stat <- cbind(meth_basic_stat[,1], proportion_basic_stat)
+colnames(proportion_basic_stat) <- c("site.id", sample_names[,1])
+
+write.table(proportion_basic_stat, file = "/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_Pre-processing/4_methyl_calling/0_all_sites/168.20miss/prop.168.merged.20miss.txt", quote = FALSE, sep = "\t", row.names = FALSE)
+```
+
+During this I will also remove sites that have a mean methylation of 10% or less and above 90%. After, I will calculate the standard deviation for the remaining sites, calculate a 5% threshold and remove all sites that show low variablility (standard deviation falls within the 5% threshold).Different papers use different thresholds for removing low variability sites (some 5%, 95%), so this is quite a loose threshold and could be further filtered later on, however, the order of filtering does matter. If you first filter for low variability,you are primarily capturing only hypo-methylated sites as most CpG islands are unmethylated. 
+
+```{r, message=FALSE, warning=FALSE}
+#calculate mean and standard deviation across individuals for all sites
+proportion_basic_stat <- proportion_basic_stat %>%
+  mutate(proportion.ave = rowMeans(proportion_basic_stat[,2:(N+1)], na.rm = TRUE),
+    proportion.sd = apply(proportion_basic_stat[,2:(N+1)], 1, function(x) sd(x, na.rm = TRUE)))
+#add site.id
+#proportion_basic_stat<- proportion_basic_stat %>%
+#                        mutate(site.id = meth_basic_stat[,1])
+
+##total sites before filtering
+ggplot(proportion_basic_stat, aes(x = proportion.ave)) +
+  geom_histogram(binwidth = 0.05, fill = "#009193", color = "black", alpha = 0.7) +
+  labs(title = "Average Methylation Proportion across Individuals Before Filtering",
+       x = "Average Methylation Proportion",
+       y = "Frequency") +
+  theme_minimal(base_size = 12) +  # Set a base size for text
+  theme(panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank(),
+    plot.title = element_text(hjust = 0.5, size = 12, face = "bold")
+  )
+##before sd
+ggplot(proportion_basic_stat, aes(x = proportion.sd)) +
+  geom_histogram(binwidth = 0.05, fill = "#009193", color = "black", alpha = 0.7) +
+  labs(title = "Standard Deviation across Individuals Before Filtering",
+       x = "Standard Deviation",
+       y = "Frequency") +
+  theme_minimal(base_size = 12) +  # Set a base size for text
+  theme(panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank(),
+    plot.title = element_text(hjust = 0.5, size = 12, face = "bold")
+  )
+```
+
+Now, filter out the hypo- and hyper- methylated sites
+
+```{r, message=FALSE, warning=FALSE}
+#make df with filtered out sites, to run some plots on later
+filtered_out <- proportion_basic_stat %>%                       
+                        rowwise %>%
+                        filter(proportion.ave < 0.1) %>%
+                        filter(proportion.ave > 0.9)
+
+#filter out hypo- (<y10%, hyper >90%,)
+proportion_basic_stat <- proportion_basic_stat %>%                       
+                        rowwise %>%
+                        filter(proportion.ave > 0.1) %>%
+                        filter(proportion.ave < 0.9)
+
+#total sites after hypo- hyper- filtering
+ggplot(proportion_basic_stat, aes(x = proportion.ave)) +
+  geom_histogram(binwidth = 0.05, fill = "#009193", color = "black", alpha = 0.7) +
+  labs(title = "Average Methylation Proportion across Individuals After Hypo/Hyper- Filter",
+       x = "Average Methylation Proportion",
+       y = "Frequency") +
+  theme_minimal(base_size = 12) +  # Set a base size for text
+  theme(panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank(),
+    plot.title = element_text(hjust = 0.5, size = 12, face = "bold")
+  )
+##before sd
+ggplot(proportion_basic_stat, aes(x = proportion.sd)) +
+  geom_histogram(binwidth = 0.05, fill = "#009193", color = "black", alpha = 0.7) +
+  labs(title = "Standard Deviation across Individuals After Hypo/Hyper- Filter",
+       x = "Standard Deviation",
+       y = "Frequency") +
+  theme_minimal(base_size = 12) +  # Set a base size for text
+  theme(panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank(),
+    plot.title = element_text(hjust = 0.5, size = 12, face = "bold")
+  )
+
+```
+
+
+```{r, message=FALSE, warning=FALSE}
+# Determine the 95th percentile threshold for the standard deviations
+threshold <- quantile(proportion_basic_stat$proportion.sd, 0.05, na.rm = TRUE)
+
+#add filtered out sites for plotting
+filtered_out_lowv <- proportion_basic_stat %>%                       
+                        rowwise %>%
+                        filter(proportion.sd <= threshold)
+
+# filter out low variability 5% threshold for standard deviation
+proportion_basic_stat<- proportion_basic_stat %>%                       
+                        rowwise %>%
+                        filter(proportion.sd >= threshold)
+
+#total sites after hypo- hyper- filtering
+ggplot(proportion_basic_stat, aes(x = proportion.ave)) +
+  geom_histogram(binwidth = 0.05, fill = "#009193", color = "black", alpha = 0.7) +
+  labs(title = "Average Methylation Proportion across Individuals After Hypo/Hyper/LowV Filter",
+       x = "Average Methylation Proportion",
+       y = "Frequency") +
+  theme_minimal(base_size = 12) +  # Set a base size for text
+  theme(panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank(),
+    plot.title = element_text(hjust = 0.5, size = 12, face = "bold")
+  )
+##before sd
+ggplot(proportion_basic_stat, aes(x = proportion.sd)) +
+  geom_histogram(binwidth = 0.05, fill = "#009193", color = "black", alpha = 0.7) +
+  labs(title = "Standard Deviation across Individuals After Hypo/Hyper/LowV Filter",
+       x = "Standard Deviation",
+       y = "Frequency") +
+  theme_minimal(base_size = 12) +  # Set a base size for text
+  theme(panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank(),
+    plot.title = element_text(hjust = 0.5, size = 12, face = "bold"))
+
+```
+Added April 2023, I need to remove loci that have one outlier as these warp distribution of methylation for the Matrix QTL analyses (likely other analyses as well, so I thought to remove them and see how the other analyses)
+
+## Remove Outlier CpG sites
+
+In running some tests for the meQTL analysis, we realized that there are many sites where one or maybe two individuals have a different methylation value from all other samples. This seems to become correlated to genotyping errors giving many false positives in the analysis. Therefore, I want to make a script that removes these outlier CpG sites (and I want to see the proportion of sites which show this outlier). Therefore, first I want to filter for such outlier CpG sites and then I want to make i) a dataframe which removes these sites. The difference in methylation may be true or due to technical errors,however, without techncial replicates we have no way of knowing.
+
+```{r message=FALSE,warning=FALSE}
+# Create the initial dataframe
+df <- as.data.frame(t(proportion_basic_stat[2:(N+1)]))
+colnames(df) <- proportion_basic_stat$site.id
+
+# Function to identify outliers and count them
+identify_outliers <- function(x) {
+  Q1 <- quantile(x, 0.25, na.rm = TRUE)
+  Q3 <- quantile(x, 0.75, na.rm = TRUE)
+  IQR <- Q3 - Q1
+  lower_bound <- Q1 - 3.5 * IQR
+  upper_bound <- Q3 + 3.5 * IQR
+  (x < lower_bound) | (x > upper_bound) # Returns logical vector of outliers
+}
+
+#Remove these outliers
+proportion_basic_stat_rmout <- df %>%
+  mutate(across(everything(), ~ifelse(identify_outliers(.x), NA, .x)))
+
+proportion_basic_stat_rmout <- t(proportion_basic_stat_rmout)
+proportion_basic_stat_rmout <- cbind(proportion_basic_stat[,1], proportion_basic_stat_rmout)
+```
+
+```{r}
+proportion_basic_stat_rmout <- proportion_basic_stat_rmout %>%
+  mutate(proportion.ave = rowMeans(proportion_basic_stat_rmout[,2:(N+1)], na.rm = TRUE))
+
+#remove loci that now are only unmethylated after removing outliers
+#filter out hypo- (<5%, hyper >95%,)
+proportion_basic_stat_rmout <- proportion_basic_stat_rmout %>%                       
+                        rowwise %>%
+                        filter(proportion.ave > 0.05) %>%
+                        filter(proportion.ave < 0.95)
+```
+
+```{r}
+write.table(proportion_basic_stat, file = "/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_Pre-processing/4_methyl_calling/0_all_sites/168.20miss/prop.168.merged.20miss.rmlowv.txt", quote = FALSE, sep = "\t", row.names = FALSE)
+write.table(proportion_basic_stat_rmout, file = "/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_Pre-processing/4_methyl_calling/0_all_sites/168.20miss/prop.168.merged.20miss.rmlowv.rmout.txt", quote = FALSE, sep = "\t", row.names = FALSE)
+```
+

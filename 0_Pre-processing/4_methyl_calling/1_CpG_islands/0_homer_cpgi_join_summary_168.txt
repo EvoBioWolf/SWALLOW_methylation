@@ -1,0 +1,16 @@
+count
+island_exon 	3093
+island_Intergenic	3276
+island_intron 	3571
+island_promoter-TSS 	942
+island_TTS 	574
+opensea_exon 	17040
+opensea_Intergenic	39275
+opensea_intron 	39605
+opensea_promoter-TSS 	2020
+opensea_TTS 	2609
+shore_exon 	2415
+shore_Intergenic	4174
+shore_intron 	5029
+shore_promoter-TSS 	1413
+shore_TTS 	725

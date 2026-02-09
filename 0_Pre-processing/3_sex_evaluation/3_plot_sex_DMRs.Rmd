@@ -1,0 +1,173 @@
+---
+title: "Sex.DMRs"
+author: "Sarah Mueller"
+date: "2023-02-08"
+output: html_document
+keepmd: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+.libPaths(c(.libPaths(),"/dss/dsshome1/lxc0B/ra52qed/R/x86_64-pc-linux-gnu-library/4.2"))
+
+library(ComplexHeatmap)
+library(RColorBrewer)
+library(circlize)
+library(ggplot2)
+library(tidyverse)
+library(readxl)
+
+
+```
+
+## Plotting DMRs related to sex 
+
+We want to look at the DMRs 
+
+```{r cars}
+sex.dmrs <- read.table("/dss/dsshome1/lxc0B/ra52qed/output/1.RRBS/7.DMC.DMR/168.bsseq/168.0miss.sex.dmcs.txt", header=T, sep="\t")
+sig.sex.dmrs <- sex.dmrs %>%
+                filter(fdrs <0.00000033)
+sig.sex.dmrs <- sig.sex.dmrs %>%
+                mutate(site.id = paste0(chr,"_",pos))
+
+sig.sex.dmrs.matrix <- inner_join(sig.sex.dmrs, prop.168.0miss, by = c("site.id"))
+
+sig.sex.dmrs.samp <- sig.sex.dmrs.matrix[,8:175]
+
+
+```
+
+Rearrange the next part of code if you would like to group by different variables from the metadata. For example, since these are sex related DMCs, I want to reassign the columns based on sex and not sample name.
+
+
+```{r cars}
+#sample names
+sample_names <- read.table("/dss/dsshome1/lxc0B/ra52qed/scripts/0.sample.lists/sample.names.168.txt")
+#get explanatory variables set
+info <- read_xlsx("/dss/dsshome1/lxc0B/ra52qed/scripts/0.sample.lists/NCBI_info_updated_20220727.xlsx")
+#remove all individuals not used for this analysis
+info=info %>%
+  dplyr::slice(match(sample_names$V1, info$sample_name))
+##SELECT ALL COLUMNS THAT WILL BE USED AS POSSIBLE VARIABLES...need to make sure this is correct, are there any others we should use?
+info <- info %>%
+  dplyr::select("sex.rrbs", "Year", "sub_species", "geo_loc_name")
+#convert to the correct format for each variable
+info$Year = as.factor(info$Year)
+info$sex.rrbs = as.character(info$sex.rrbs)
+info$sub_species = as.factor(info$sub_species)
+info$geo_loc_name = as.factor(info$geo_loc_name)
+
+#rearrange heatmap matrix
+colnames(sig.sex.dmrs.samp) <- c(info$sub_species)
+tr <- as.data.frame(t(sig.sex.dmrs.samp))
+tr <- tr[order(row.names(tr)),]
+sig.sex.dmrs.samp <- as.matrix(t(tr))
+
+```
+
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r dev = "png"}
+ha <- HeatmapAnnotation(summary = anno_summary(gp = gpar(fill = 2), 
+                                               height = unit(2, "cm")))
+h1 <- Heatmap(MeQTL_cis_Assn, cluster_rows = T, 
+            column_labels = snps, name="snp sites",
+            cluster_columns = T)
+
+h1
+```
+Create correct home output form...dont need this section if you have already run it once, move to the next and call the homer.output.txt file
+```{r pressure, echo=FALSE}
+#import homer output
+#homer.output.168.0miss <- read.delim("~/output/0.genome.files/3.homer/homer.output.168.0miss.txt")
+#names(homer.output.168.0miss)[names(homer.output.168.0miss) == "PeakID..cmd.annotatePeaks.pl..dss.dsshome1.lxc0B.ra52qed.scripts.0.genome.files.homer.homer.input.168.10miss.bed..dss.dsslegfs01.pr53da.pr53da.dss.0034.assemblies.Hirundo.rustica.genome.v2.Hirundo.rustica_genome_bHirRus1_PacBio.Illumina.Hi.C.DLS_v2.fasta..gtf..dss.dsslegfs01.pr53da.pr53da.dss.0034.assemblies.Hirundo.rustica.genome.v2.annotation.GCF_015227805.1_bHirRus1.pri.v2_genomic.gtf."] <- "PeakID"
+#separate annotation column to have separate bins
+#homer.output.168.0miss$Annotation = sub("\\(.*", "", homer.output.168.0miss$Annotation)
+#convert . to underscore
+#homer.output.168.0miss$PeakID = sub("\\.", "_", homer.output.168.0miss$PeakID)
+#convert annotation to factor
+#homer.output.168.0miss$Annotation <- as.factor(homer.output.168.0miss$Annotation)
+#summary(homer.output.168.0miss$Annotation)
+#homer.output.168.0miss <- homer.output.168.0miss %>%
+#  dplyr::select(c("PeakID", "Chr", "Start", "End", "Strand", "Annotation", "Detailed.Annotation", "Distance.to.TSS", "Nearest.PromoterID", "Entrez.ID", "Nearest.Unigene", "Gene.Type"))
+#write.table(homer.output.168.0miss, file = "/dss/dsshome1/lxc0B/ra52qed/output/0.genome.files/3.homer/homer.output.168.0miss.txt", quote=F, row.names=F, sep="\t")
+```
+
+Now, I want to join these to hypo-methylated regions and see if any of these differentially methylated regions fall into places that we know and plot them using karyoploteR.
+
+```{r pressure, echo=FALSE}
+#load hmrs
+hmrs <- read.table("/dss/dsshome1/lxc0B/ra52qed/output/1.RRBS/5.1.dnmtools/1.hmr/85.hmr.joined.txt", header=T)
+#import homer output
+homer.output.168.0miss <- read.table("/dss/dsshome1/lxc0B/ra52qed/output/0.genome.files/3.homer/homer.output.168.0miss.txt", header=T, sep="\t")
+
+sig.sex.dmrs %>%
+  mutate(found = map_chr(
+    .x = start,
+    .f = ~ if_else(
+      condition = any(.x > hmrs$start & .x < hmrs$end),
+      true = "Yes",
+      false = NA_character_
+    )
+  ))
+
+
+
+```
+
+Get average methylation in females vs. males that can then be used in a karyoploter
+```{r cars}
+prop.168.0miss <- read.table("/dss/dsshome1/lxc0B/ra52qed/output/1.RRBS/4.0.methyl.calling/4.1.methylkit.unite.filter/168.0miss/prop.168.0miss.txt", header=T, sep="\t")
+
+dmc.prop <- inner_join(sig.sex.dmrs, prop.168.0miss, by= "site.id")
+
+male.mean <- dmc.prop %>%
+  dplyr::select(contains("_M")) %>%
+  rowwise%>%
+  mutate(male.mean = mean(c_across(where(is.numeric))))
+
+female.mean <- dmc.prop %>%
+  dplyr::select(contains("_F")) %>%
+  rowwise%>%
+  mutate(female.mean = mean(c_across(where(is.numeric))))
+
+means <- cbind( male.mean$male.mean, female.mean$female.mean)
+
+```
+
+Heatmap the means
+
+```{r dev = "png"}
+ha <- HeatmapAnnotation(summary = anno_summary(gp = gpar(fill = 2), 
+                                               height = unit(2, "cm")))
+h1 <- Heatmap(means, cluster_rows = T, 
+            column_labels = colnames(means), name="DMRs associated to sex",
+            cluster_columns = F)
+
+h2 <- Heatmap(dmc.prop$fdrs, row_labels = dmc.prop$chr, 
+            cluster_rows = T, name="pvalue", top_annotation = ha)
+
+h1+h2
+```
+
+plot some specific regions in the genome
+
+```{r pressure, echo=FALSE}
+#make input for karyotype
+
+dmc.sex <- cbind(sig.sex.dmrs[,1:7], male.mean$male.mean, female.mean$female.mean)
+lookup <- c(mm = "male.mean$male.mean", fm = "female.mean$female.mean")
+dmc.sex <- dmc.sex %>%
+  mutate(end = (start +1))%>%
+  relocate(end, .after = start)%>%
+  rename(all_of(lookup))
+
+write.table(dmc.sex, file = "/dss/dsshome1/lxc0B/ra52qed/output/1.RRBS/3.2.sex.evaluation/167.dmc.sex.mean.bed", quote=F, row.names=F, col.names = F, sep="\t")
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

@@ -1,0 +1,212 @@
+---
+title: "PST_regional"
+author: "Sarah Mueller"
+date: "2025-03-26"
+output: html_document
+---
+```{r setup, include=FALSE}
+### Libraries
+.libPaths(c(.libPaths(),"/dss/dsshome1/lxc0B/ra52qed/R/x86_64-pc-linux-gnu-library/4.2"))
+
+library(vegan)
+library(plyr)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(broom)
+library(readxl)
+library(ggrepel)
+#library(ggpubr)
+library(purrr)
+library(wesanderson)
+library(readr)
+```
+
+## Averaging across 10kb windows
+
+I created a dataset including CpG isalnds, shores and openseas in this script (/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_Pre-processing/4_methyl_calling/1_CpG_islands/0_homer_cpgi_dataset_NEW.Rmd). Now I want to average these values across 10kb windows, so that I can run correlations between FST and PST values in the same window sizes. However, this will be done separately for islands, shores and openseas-
+
+## Load dataset
+
+```{r}
+#genome information
+hr.genome <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_genome_files/0_rename_chr/chromosomes.genome")
+colnames(hr.genome) <- c("chr", "max_bp")
+hr.genome <- hr.genome %>%
+  filter(!grepl("_random|W|Z", chr))
+
+#load sample names
+sample_names <- read.table(file = "/dss/dsshome1/lxc0B/ra52qed/gitlab/swallow.projects/scripts/0_sample.lists/sample.names.85.txt")
+
+#load combined homer and methylation data
+prop.homer.20miss <- read.delim("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_Pre-processing/4_methyl_calling/1_CpG_islands/85.20miss/homer.cpgi.prop.85.merged.20miss.rmlowv.rmout.txt", header=T)
+
+prop.homer.20miss <- prop.homer.20miss %>%
+  mutate(category = str_trim(category, side = "right"))
+```
+
+I need to separate these into the islands shores and openseas again
+
+```{r}
+cpgi_values <- prop.homer.20miss %>% filter(grepl("^island_", category))
+shore_values <- prop.homer.20miss %>% filter(grepl("^shore_", category))
+open_values <- prop.homer.20miss %>% filter(grepl("^opensea_", category))
+```
+
+Next, I want to calculate one value per window.
+
+```{r warning=FALSE, message=FALSE}
+#RUN THIS ONLY IF YOU WANT A SPECIFIC SUB-SECTION
+cpgi_values <- cpgi_values %>% filter(category == "island_Intergenic")
+
+cpgi_values <- cpgi_values %>%
+  mutate(copy = `region.id`) %>%
+  separate(copy, into = c("chr", "window_pos_1", "window_pos_2"), sep = "_", remove = TRUE) %>%
+  mutate(
+    window_pos_1 = as.numeric(window_pos_1),
+    window_pos_2 = as.numeric(window_pos_2) 
+  )
+
+# Create a lookup table for chromosome lengths
+chr_lengths <- hr.genome
+
+# --- Process cpgi_values to assign windows ---
+window_size <- 10000
+
+cpgi_values_window <- cpgi_values %>%
+  mutate(
+    window_start_1 = floor((window_pos_1 - 1) / window_size) * window_size + 1,
+    window_end_1 = floor((window_pos_1 - 1) / window_size) * window_size + window_size
+  )
+
+cpgi_values_window_ave <- cpgi_values_window %>%
+  group_by(chr, window_start_1) %>%
+  dplyr::summarise(n_cpgi = n(), across(contains("_ADL_"), mean, na.rm=TRUE))
+```
+
+Write output
+```{r}
+write_delim(cpgi_values_window_ave,file="/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_Pre-processing/4_methyl_calling/1_CpG_islands/85.20miss/cpgi.intergenic.window.10kb.prop.85.merged.20miss.rmlowv.rmout.txt", delim="\t", quote_escape = "double")  
+
+```
+
+Look at how methylation changes depending on the number of CpG islands that are averaged in the window.
+
+Clearly, the more CpG islands within the window, the less variation in methylation values there is.
+
+```{r}
+###test is no ave cpgi corresponds to ave methylation
+df <- cpgi_values_window_ave %>%
+  pivot_longer(cols = contains("_ADL_"), names_to = "individual", values_to = "ave_meth")
+
+scatterplot <- ggplot(df, aes(x = n_cpgi, y = ave_meth)) +
+  geom_point() +
+  labs(
+    title = "Scatterplot of Average Methylation vs. Number of CpGs",
+    x = "Number of CpGs (n_cpgs)",
+    y = "Average Methylation (ave_meth)"
+  ) +
+  theme_bw() # Optional: Use a cleaner theme
+
+# Print the plot
+print(scatterplot)
+
+```
+
+
+```{r}
+#RUN THIS ONLY IF YOU WANT A SPECIFIC SUB-SECTION
+shore_values <- shore_values %>% filter(category == "shore_Intergenic")
+
+shore_values <- shore_values %>%
+  mutate(copy = `region.id`) %>%
+  separate(copy, into = c("chr", "window_pos_1", "window_pos_2"), sep = "_", remove = TRUE) %>%
+  mutate(
+    window_pos_1 = as.numeric(window_pos_1),
+    window_pos_2 = as.numeric(window_pos_2) 
+  )
+
+# Create a lookup table for chromosome lengths
+chr_lengths <- hr.genome
+
+# --- Process cpgi_values to assign windows ---
+window_size <- 10000
+
+shore_values_window <- shore_values %>%
+  mutate(
+    window_start_1 = floor((window_pos_1 - 1) / window_size) * window_size + 1,
+    window_end_1 = floor((window_pos_1 - 1) / window_size) * window_size + window_size
+  )
+
+shore_values_window_ave <- shore_values_window %>%
+  group_by(chr, window_start_1) %>%
+  dplyr::summarise(n_cpgi = n(), across(contains("_ADL_"), mean, na.rm=TRUE))
+```
+
+Write output
+```{r}
+write_delim(shore_values_window_ave,file="/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_Pre-processing/4_methyl_calling/1_CpG_islands/85.20miss/shore.intergenic.window.10kb.prop.85.merged.20miss.rmlowv.rmout.txt", delim="\t", quote_escape = "double")  
+
+```
+Look at how methylation changes depending on the number of CpG islands that are averaged in the window.
+
+Clearly, the more CpG islands within the window, the less variation in methylation values there is.
+
+```{r}
+###test is no ave cpgi corresponds to ave methylation
+df <- shore_values_window_ave %>%
+  pivot_longer(cols = contains("_ADL_"), names_to = "individual", values_to = "ave_meth")
+
+scatterplot <- ggplot(df, aes(x = n_cpgi, y = ave_meth)) +
+  geom_point() +
+  labs(
+    title = "Scatterplot of Average Methylation vs. Number of CpGs",
+    x = "Number of CpGs (n_cpgs)",
+    y = "Average Methylation (ave_meth)"
+  ) +
+  theme_bw() # Optional: Use a cleaner theme
+
+# Print the plot
+print(scatterplot)
+
+```
+For opensea values
+
+
+```{r}
+#RUN THIS ONLY IF YOU WANT A SPECIFIC SUB-SECTION
+open_values <- open_values %>% filter(category == "opensea_Intergenic")
+  
+open_values <- open_values %>%
+  mutate(copy = `region.id`) %>%
+  separate(copy, into = c("chr", "pos"), sep = "_", remove = TRUE) %>%
+  mutate(
+    pos = as.numeric(pos) 
+  )
+
+# Create a lookup table for chromosome lengths
+chr_lengths <- hr.genome
+
+# --- Process cpgi_values to assign windows ---
+window_size <- 10000
+
+open_values_window <- open_values %>%
+  mutate(
+    window_start_1 = floor((pos - 1) / window_size) * window_size + 1,
+    window_end_1 = floor((pos - 1) / window_size) * window_size + window_size
+  )
+
+open_values_window_ave <- open_values_window %>%
+  group_by(chr, window_start_1) %>%
+  dplyr::summarise(n_cpgi = n(), across(contains("_ADL_"), mean, na.rm=TRUE))
+
+#remove any means that are based on only 1 or 2 values
+open_values_window_ave_test <- open_values_window_ave %>%
+  filter(n_cpgi >= 3)
+```
+
+Write output
+```{r}
+write_delim(open_values_window_ave_test,file="/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_Pre-processing/4_methyl_calling/1_CpG_islands/85.20miss/opensea.intergenic.window.10kb.prop.85.merged.20miss.rmlowv.rmout.txt", delim="\t", quote_escape = "double")  
+```
+

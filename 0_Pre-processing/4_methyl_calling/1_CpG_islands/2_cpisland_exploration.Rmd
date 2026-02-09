@@ -1,0 +1,357 @@
+---
+title: "Defining loci in CpGislands"
+author: "Sarah Mueller"
+date: "2023-07-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+### Libraries
+.libPaths(c(.libPaths(),"/dss/dsshome1/lxc0B/ra52qed/R/x86_64-pc-linux-gnu-library/4.2"))
+
+library(vegan)
+library(ggplot2, lib = "/dss/dsshome1/lxc0B/ra52qed/R/x86_64-pc-linux-gnu-library/4.2")
+library(plyr)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(broom)
+library(readxl)
+library(ggrepel)
+library(ggpubr)
+library(purrr)
+library(wesanderson)
+```
+
+## Look into the CpG island methylation
+
+```{r warning=FALSE, message=FALSE}
+cpgi.prop.20miss <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_Pre-processing/4_methyl_calling/1_CpG_islands/85.20miss/homer.cpgi.prop.85.merged.20miss.rmlowv.rmout.txt", header=T)
+     
+```
+
+## Plot CpG islands to see what methylation looks like
+
+I just want to plot a few regions so that we can see how methylation status changes across regions. We start with some random regions from the genome. Populations (here representing subspecies rustica and gutturalis) have ~10 individuals each.
+
+```{r warning=FALSE, message=FALSE}
+filtered_df <- cpgi.prop.20miss %>%
+  filter(str_detect(site.id, "chr02"))
+
+filtered_df <- filtered_df %>%
+              filter(!is.na(cpgi.id))
+
+# Melt the dataframe to long format for plotting
+filtered_df <- filtered_df %>%
+  separate(site.id, into = c("chrom", "pos"), sep = "_", convert = TRUE)
+
+melted_df <- tidyr::gather(filtered_df, key = "individual", value = "methylation_prop", contains("_R_") | contains("_G_") | contains("_T_"))
+
+#color pallette
+pal <- c( #"#00B5B8", #E
+          "#6294b7", #G
+          "#aa0a0f", #R
+          #"#9716a8", #RG
+          #"#FFA500", #RT
+          #"#734a0e", #S
+          "#FFEF00", #T
+          "#A0825A") #TV
+          #"grey") #NA/unknown
+
+
+# Create a new column to group individuals based on their names
+melted_df <- melted_df %>%
+  mutate(population = case_when(
+    grepl("_R_", individual) ~ "rustica",
+    grepl("_G_", individual) ~ "gutturalis",
+     grepl("_T_", individual) ~ "tytleri",
+     grepl("_TV_", individual) ~ "transitiva",
+     grepl("_E_", individual) ~ "eyrthrogaster",
+     grepl("_S_", individual) ~ "savignii",
+    TRUE ~ "other"
+  ))
+
+# Plot the data with different colors for different groups
+ggplot(melted_df, aes(x = pos, y = methylation_prop, color = population, group = individual)) +
+  scale_color_manual(values = pal)+
+  geom_point(size = 1) +
+  labs(x = "Position (pos)", y = "Methylation Proportion", color = "Population") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggplot(melted_df, aes(x = pos, y = methylation_prop, color = population, group = individual)) +
+  scale_color_manual(values = pal)+
+  geom_point(size = 1) +
+   xlim(c(97800000, 98600000)) +
+  labs(x = "Position (pos)", y = "Methylation Proportion", color = "Population") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Now, instead of random sites, I will look at a few CpG islands that have mid-range methylation.
+
+```{r, echo=FALSE}
+filtered_df <- cpgi.prop.20miss %>%
+  filter(str_detect(site.id, "chr24_832|chr01_103|chr27_134"))
+
+filtered_df <- filtered_df %>%
+              filter(!is.na(cpgi.id))
+# Melt the dataframe to long format for plotting
+filtered_df <- filtered_df %>%
+  separate(site.id, into = c("chrom", "pos"), sep = "_", convert = TRUE)
+
+melted_df <- tidyr::gather(filtered_df, key = "individual", value = "methylation_prop", contains("_R_") | contains("_G_") | contains("_T_"))
+
+#color pallette
+pal <- c( #"#00B5B8", #E
+          "#6294b7", #G
+          "#aa0a0f", #R
+          #"#9716a8", #RG
+          #"#FFA500", #RT
+          #"#734a0e", #S
+          "#FFEF00", #T
+          "#A0825A", #TV
+          "grey") #NA/unknown
+
+
+# Create a new column to group individuals based on their names
+melted_df <- melted_df %>%
+  mutate(population = case_when(
+    grepl("_R_", individual) ~ "rustica",
+    grepl("_G_", individual) ~ "gutturalis",
+     grepl("_T_", individual) ~ "tytleri",
+     grepl("_TV_", individual) ~ "transitiva",
+     grepl("_E_", individual) ~ "eyrthrogaster",
+     grepl("_S_", individual) ~ "savignii",
+    TRUE ~ "other"
+  ))
+
+# Plot the data with different colors for different groups
+ggplot(melted_df, aes(x = pos, y = methylation_prop, color = population, group = individual)) +
+  scale_color_manual(values = pal)+
+  geom_point(size = 1) +
+  xlim(c(832481, 832942)) +
+  labs(x = "Position (pos)", y = "Methylation Proportion", color = "Population") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggplot(melted_df, aes(x = pos, y = methylation_prop, color = population, group = individual)) +
+  scale_color_manual(values = pal)+
+  geom_point(size = 1) +
+  xlim(c(103341049, 103341194)) +
+  labs(x = "Position (pos)", y = "Methylation Proportion", color = "Population") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggplot(melted_df, aes(x = pos, y = methylation_prop, color = population, group = individual)) +
+  scale_color_manual(values = pal)+
+  geom_point(size = 1) +
+  xlim(c(1347748, 1348099)) +
+  labs(x = "Position (pos)", y = "Methylation Proportion", color = "Population") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+```
+##Plot a few regions from the identified DMR/DMCs from rustica gutturalis parental populations
+
+I pulled a few regions from the DMR analysis between RG (see /dss/dsshome1/lxc0B/ra52qed/gitlab/swallow.projects/scripts/1.RRBS/7.DMC.DMR/RGHZ/RG.HZ.24.20miss.dmr.txt) for more details
+
+chr05	60432781	60432868	88	16	46.9082336501503	sub_speciesrustica
+chr24	6500240	6500298	59	17	46.5049219312999	sub_speciesrustica
+chr01A	34555810	34555927	118	12	44.3600764817706	sub_speciesrustica
+
+I will plot these three to see what the methylation in these regions looks like:
+
+```{r, echo=FALSE}
+filtered_df <- cpgi.prop.20miss %>%
+  filter(str_detect(site.id, "chr05_604|chr24_650|chr01A_345"))
+
+# Melt the dataframe to long format for plotting
+filtered_df <- filtered_df %>%
+  separate(site.id, into = c("chrom", "pos"), sep = "_", convert = TRUE)
+
+melted_df <- tidyr::gather(filtered_df, key = "individual", value = "methylation_prop", contains("_R_") | contains("_G_") | contains("_T_"))
+
+#color pallette
+pal <- c( #"#00B5B8", #E
+          "#6294b7", #G
+          "#aa0a0f", #R
+          "#9716a8", #RG
+          "#FFA500", #RT
+          "#734a0e", #S
+          "#FFEF00", #T
+          "#A0825A", #TV
+          "grey") #NA/unknown
+
+
+# Create a new column to group individuals based on their names
+melted_df <- melted_df %>%
+  mutate(population = case_when(
+    grepl("_R_", individual) ~ "rustica",
+    grepl("_G_", individual) ~ "gutturalis",
+     grepl("_T_", individual) ~ "tytleri",
+     grepl("_TV_", individual) ~ "transitiva",
+     grepl("_E_", individual) ~ "eyrthrogaster",
+     grepl("_S_", individual) ~ "savignii",
+    TRUE ~ "other"
+  ))
+
+# Plot the data with different colors for different groups
+ggplot(melted_df, aes(x = pos, y = methylation_prop, color = population, group = individual)) +
+  geom_point(size = 1) +
+  xlim(c(60432781, 60432868)) +
+  labs(x = "Position (pos)", y = "Methylation Proportion", color = "Population") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggplot(melted_df, aes(x = pos, y = methylation_prop, color = population, group = individual)) +
+  geom_point(size = 1) +
+  xlim(c(6500240, 6500298)) +
+  labs(x = "Position (pos)", y = "Methylation Proportion", color = "Population") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggplot(melted_df, aes(x = pos, y = methylation_prop, color = population, group = individual)) +
+  geom_point(size = 1) +
+  xlim(c(34555810,	34555927)) +
+  labs(x = "Position (pos)", y = "Methylation Proportion", color = "Population") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+```
+
+
+Based on Zhang et al. 2015 (Zotero: cpg islands) I want to look at what percentage of sites are unmethylated in CpG islands and how this fits to other literature. Additionally, of CpG islands that are not mainly unmethylated, are they completely methylated (above 70%) or rather fall in the middle (30-70%).
+
+```{r message=FALSE, warning=FALSE}
+#keep only sites in cpg islands
+cpgi.prop.20miss_onlycpgi <- cpgi.prop.20miss %>%
+  filter(!is.na(cpgi.id))
+
+mean_df <- cpgi.prop.20miss_onlycpgi %>%
+  group_by(cpgi.id) %>%
+  summarize(across(contains("_ADL_"), mean, na.rm = TRUE))
+
+mean_df_pop <- mean_df %>%
+  rowwise() %>%
+  mutate(S = mean(c_across(contains("_S_")), na.rm = TRUE),
+         R = mean(c_across(contains("_R_")), na.rm = TRUE),
+         G = mean(c_across(contains("_G_")), na.rm = TRUE),
+         T = mean(c_across(contains("_T_")), na.rm = TRUE),
+         TV = mean(c_across(contains("_TV_")), na.rm = TRUE),
+         E = mean(c_across(contains("_E_")), na.rm = TRUE)) %>%
+  ungroup()
+
+df_summary <- mean_df_pop %>%
+  summarise(
+    S_Hypomethylated = sum(S < 0.3, na.rm = T) / n(),
+    S_Hemimethylated = sum(S >= 0.3 & S <= 0.7, na.rm = T) / n(),
+    S_Hypermethylated = sum(S > 0.7, na.rm = T) / n(),
+    R_Hypomethylated = sum(R < 0.3, na.rm = T) / n(),
+    R_Hemimethylated = sum(R >= 0.3 & R <= 0.7, na.rm = T) / n(),
+    R_Hypermethylated = sum(R > 0.7, na.rm = T) / n(),
+    G_Hypomethylated = sum(G < 0.3, na.rm = T) / n(),
+    G_Hemimethylated = sum(G >= 0.3 & G <= 0.7, na.rm = T) / n(),
+    G_Hypermethylated = sum(G > 0.7, na.rm = T) / n(),
+    T_Hypomethylated = sum(T < 0.3, na.rm = T) / n(),
+    T_Hemimethylated = sum(T >= 0.3 & T <= 0.7, na.rm = T) / n(),
+    T_Hypermethylated = sum(T > 0.7, na.rm = T) / n(),
+    TV_Hypomethylated = sum(TV < 0.3, na.rm = T) / n(),
+    TV_Hemimethylated = sum(TV >= 0.3 & TV <= 0.7, na.rm = T) / n(),
+    TV_Hypermethylated = sum(TV > 0.7, na.rm = T) / n(),
+    E_Hypomethylated = sum(E < 0.3, na.rm = T) / n(),
+    E_Hemimethylated = sum(E >= 0.3 & E <= 0.7, na.rm = T) / n(),
+    E_Hypermethylated = sum(E > 0.7, na.rm = T) / n()
+  )
+
+df.sum.pop <- as.data.frame(t(df_summary))
+df.sum.pop$category <- rownames(df.sum.pop)
+df.sum.pop <- df.sum.pop %>%
+            separate(category, into = c("pop", "category"), sep = "_")
+
+# Plot the data
+ggplot(df.sum.pop, aes(x = pop, y = V1, fill = factor(category))) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_fill_manual(values = wes_palette("Darjeeling1")) +  
+  labs(x = "Population", y = "Percentage of CpG sites") +
+  theme_minimal() +
+  geom_text(aes(label = sprintf("%.1f%%", V1 * 100)), position = position_stack(vjust = 0.5))
+
+```
+I want to see how well the average of sites in a CpG island reflect each CpG loci within the island. So I want to calculate the average methylation across CpG islands and compare this to each loci. This step was done in the last step, so I have a dataframe that has average methylation across CpG islands (essentially cpgi.id, indv1, indv2, etc.). Then I can join this to the individual dataset and compare loci to cpgi.ave
+
+```{r}
+
+cpgi.indv.comparison <- full_join(cpgi.prop.20miss_onlycpgi, mean_df, by = "cpgi.id")
+
+# Extract individual names
+individuals <- unique(gsub("\\.x$|\\.y$", "", names(cpgi.indv.comparison)[-1]))
+individuals <- individuals[2:169]
+
+# Create a list of data frames
+list_by_cpgi <- lapply(unique(cpgi.indv.comparison$cpgi.id), function(cpgi) {
+  sub_df <- cpgi.indv.comparison[cpgi.indv.comparison$cpgi.id == cpgi, ]
+  individual_cols <- c(paste0(individuals, ".x"), paste0(individuals, ".y"))
+  result_df <- data.frame(cpgi.id = cpgi, sub_df[, individual_cols, drop = FALSE])
+  return(result_df)
+})
+
+######THIS IS NOT WORKING AT THE MOMENT, IM NOT SURE HOW TO MEANINGFULLY SUBSET THIS TO GET THE COMPARISONS I NEED##########
+
+
+```
+
+Next, I want to see how well the methylation loci at a specific locus across individuals of the same population predict the methylation sites. So I want to calculate the average across populations at each loci and compare to single CpG loci from each individual.
+
+```{r}
+
+
+```
+
+Now I want to see which predicts methylation better.
+
+```{r}
+
+
+```
+
+I want to pull out sites that are extremely noisy (so those sites with high variance within populations). The question is what to do with these sites...is there a way to figure out where the 'noise' is coming from??
+
+```{r}
+
+
+```
+
+I also want to see how many sites fall outside of CpG islands, and look into a few of these sites.
+
+```{r}
+
+
+```
+
+
+Now I want to look at the correlation between sites within the same CpG island, as this should tell me how well the methylation at 1 CpG loci in a CpG island reflects the overall methylation status. This is one method, which is under testing:
+
+```{r warning=FALSE}
+# first split the cpgi.prop.168.20miss based on cpgi.id
+cpgi_prop_list <- split(cpgi.prop.20miss, cpgi.prop.20miss$cpgi.id)
+
+# Calculate correlations within each group and store in a list
+cor_within <- lapply(cpgi_prop_list, function(sub_df) {
+  cor(sub_df[, 3:170])
+})
+
+# Calculate correlations across all groups
+cor_across <- cor(cpgi.prop.168.20miss[, 3:170])
+
+# View the correlations within each group
+print(cor_within)
+
+# View the correlation across all groups
+print(cor_across)
+
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
