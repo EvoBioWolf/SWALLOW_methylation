@@ -1,0 +1,330 @@
+---
+title: "GC content mapped along the genome"
+author: "Sarah Mueller"
+date: "2024-December"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+### Libraries
+.libPaths(c(.libPaths(),"/dss/dsshome1/lxc0B/ra52qed/R/x86_64-pc-linux-gnu-library/4.2"))
+
+library(vegan)
+#library(ggplot2, lib = "/dss/dsshome1/lxc0B/ra52qed/R/x86_64-pc-linux-gnu-library/4.2")
+library(plyr)
+library(dplyr)
+library(broom)
+library(readxl)
+library(cluster)
+library(ape)
+library(languageR)
+library(packfor)
+library(ggrepel)
+library(tidyverse)
+library(ggpmisc)
+library(data.table)
+```
+
+## GC content graph
+
+I calculated GC content acroos the genome using /dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_genome_files/5_GC_content/0_calculate_GC_content.sh and will use that output 1_gc_content.txt too plot GC content across the genomes.
+
+I am curious if in the chromosome ends there is a higher amount of GC content as well as on microchromosomes, because we see increase PST and methylation difference in these regions. Maybe this is the reason why, and if so we need to correct for GC content in those calculations
+
+## Load in DXY windows and find where CpG loci and DXY windows overlap
+```{r}
+gc.cont <- read.delim("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_genome_files/5_GC_content/1_gc_content.txt", header=T)
+
+#rename first 3 columns
+colnames(gc.cont)[1:3] <- c("chr", "window_start", "window_end")
+
+#add cumulative base pair counts for plotting in a manhattan plot
+ data_cum <- gc.cont %>%
+    group_by(gc.cont$chr) %>%
+    dplyr::summarize(max_bp = max(window_end)) %>%
+    mutate(bp_add = lag(cumsum(max_bp), default = 0))
+ 
+ colnames(data_cum)[1] <- "chr"
+  
+# Convert bp_add to numeric
+data_cum$bp_add <- as.numeric(data_cum$bp_add)
+  
+# Step 2: Join with the original dataframe and calculate bp_cum
+gc.cont.plot <- gc.cont %>%
+    inner_join(data_cum, by = "chr") %>%
+    mutate(window_end = as.numeric(window_end),
+           bp_cum = window_end + bp_add) #%>%
+    #select(-bp_add)  # Optionally remove the bp_add and max_bp columns
+
+
+#get rid of the 'random' chromosomes and scaffolds for plotting because they cause issues with colors
+gc.cont.plot <- gc.cont.plot[!grepl("_random", gc.cont.plot$chr), ]
+
+```
+
+
+##Plot along the genome
+
+```{r, message=F, warning =F}
+axis_set <- gc.cont.plot %>%
+    group_by(chr) %>%
+    dplyr::summarize(center = mean(bp_cum))
+
+  # Create the plot
+ggplot(gc.cont.plot, aes(x = bp_cum, y = X5_pct_gc, color = as.factor(chr)))+
+                   #shape = no_cpg >= 2)) +  
+    #geom_hline(yintercept = 0.1, color = "grey40", linetype = "dashed") + 
+    geom_point(alpha = 0.75) +
+    scale_y_continuous(limits = c(0.3, 1)) + 
+    scale_x_continuous(labels = axis_set$chr, breaks = axis_set$center) +
+    scale_color_manual(values = rep(c("#276FBF", "#D58544"), length(unique(axis_set$chr)))) +
+    scale_shape_manual(values = c(16, 17)) +  # Shapes: 16 = circle, 17 = triangle
+    theme_minimal() +
+    theme(
+      legend.position = "none",
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor.x = element_blank(),
+      axis.title.y = element_blank(),
+      axis.text.x = element_text(angle = 60, size = 8, vjust = 0.5),
+      plot.title = element_text(hjust = 0.5)  # Center the title
+    )
+
+
+```
+```{r}
+# Group by 'chr' and calculate the average gc_content
+gc_cont_summary <- gc.cont %>%
+  group_by(chr) %>%
+  summarise(ave_gc_cont = mean(X5_pct_gc, na.rm = TRUE))
+
+gc_cont_summary <- gc_cont_summary %>%
+                    left_join(data_cum, by= "chr")
+
+#Plot GC content vs. chromosome size
+gc_cont_summary$category <- cut(gc_cont_summary$max_bp,
+                                breaks = c(-Inf, 2000000, 20000000, Inf),
+                                labels = c("Micro (<2Mb)", "Intermediate (2-20Mb)", "Macro (>20Mb)"))
+
+#get rid of the 'random' chromosomes and scaffolds for plotting because they cause issues with colors
+gc_cont_summary <- gc_cont_summary[!grepl("_random", gc_cont_summary$chr), ]
+
+# Plot the data
+dot_plot <- ggplot(gc_cont_summary, aes(x = max_bp, y = ave_gc_cont, color = category)) +
+  geom_point(size = 3) +
+  scale_color_manual(values = c("Micro (<2Mb)" = "blue", 
+                                "Intermediate (2-20Mb)" = "orange", 
+                                "Macro (>20Mb)" = "red")) +
+  labs(x = "Chromosome Length (bp)", 
+       y = "GC Content",
+       title = "Chromosome Length vs GC Content",
+       color = "Chromosome Category") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Display the plot
+print(dot_plot)
+
+```
+
+```{r}
+#Load methylation data
+prop.168.20miss.merged <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_Pre-processing/4_methyl_calling/0_all_sites/168.20miss/prop.168.merged.20miss.rmlowv.rmout.txt", header=T)
+prop.168.20miss.merged <- prop.168.20miss.merged %>%
+                            separate(site.id, into = c("chr", "pos"), sep = "_", convert = TRUE)
+
+# Initiate list of populations
+population_groups <- list(
+  S = "_S_",
+  E = "_E_",
+  Rr = "RU_13_R_",
+  Reu = "19_R",
+  G = "_G_",
+  T = "_T_",
+  TV = "_TV_"
+)
+
+# Ensure the 'chr' column exists to group by chromosome
+# Replace 'prop.168.all' with your actual dataframe name
+# Assume the dataframe has a column named 'chr' for chromosome
+
+# Split data by chromosome
+chromosomes <- unique(prop.168.20miss.merged$chr)  # Identify unique chromosomes
+results_list <- list()
+
+# Loop through each chromosome to calculate population averages
+for (chr in chromosomes) {
+  cat("Processing chromosome:", chr, "\n")
+  
+  # Subset dataframe by chromosome
+  chr_data <- prop.168.20miss.merged[prop.168.20miss.merged$chr == chr, ]
+  
+  # Calculate population averages for this chromosome
+  population_means_chr <- sapply(names(population_groups), function(pop) {
+    cols <- grep(population_groups[[pop]], colnames(chr_data), value = TRUE)
+    if (length(cols) == 0) return(NULL)  # If no columns match, return NULL
+    
+    # Row-wise means for matching columns
+    means <- apply(chr_data[, cols, drop = FALSE], 1, function(x) mean(x, na.rm = TRUE))
+    return(means)
+  })
+  
+  # Convert to dataframe
+  population_means_chr <- as.data.frame(population_means_chr)
+  
+  # Add chromosome column
+  population_means_chr$chr <- chr
+  
+  # Summarize the average for the chromosome
+  chromosome_avg <- colMeans(population_means_chr[, -ncol(population_means_chr)], na.rm = TRUE)
+  results_list[[chr]] <- data.frame(chr = chr, t(chromosome_avg))
+}
+
+# Combine all chromosome results
+population_avg_per_chr <- do.call(rbind, results_list)
+
+# View final results
+print(population_avg_per_chr)
+```
+```{r}
+#Load invariant methylation data
+prop.168.20miss.merged.inv <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_Pre-processing/4_methyl_calling/0_all_sites/168.20miss/prop.168.merged.20miss.txt", header=T)
+prop.168.20miss.merged.inv <- prop.168.20miss.merged.inv %>%
+                            separate(site.id, into = c("chr", "pos"), sep = "_", convert = TRUE)
+
+# Initiate list of populations
+population_groups <- list(
+  S = "_S_",
+  E = "_E_",
+  Rr = "RU_13_R_",
+  Reu = "19_R",
+  G = "_G_",
+  T = "_T_",
+  TV = "_TV_"
+)
+
+# Ensure the 'chr' column exists to group by chromosome
+# Replace 'prop.168.all' with your actual dataframe name
+# Assume the dataframe has a column named 'chr' for chromosome
+
+# Split data by chromosome
+chromosomes <- unique(prop.168.20miss.merged.inv$chr)  # Identify unique chromosomes
+results_list_inv <- list()
+
+# Loop through each chromosome to calculate population averages
+for (chr in chromosomes) {
+  cat("Processing chromosome:", chr, "\n")
+  
+  # Subset dataframe by chromosome
+  chr_data <- prop.168.20miss.merged.inv[prop.168.20miss.merged.inv$chr == chr, ]
+  
+  # Calculate population averages for this chromosome
+  population_means_chr_inv <- sapply(names(population_groups), function(pop) {
+    cols <- grep(population_groups[[pop]], colnames(chr_data), value = TRUE)
+    if (length(cols) == 0) return(NULL)  # If no columns match, return NULL
+    
+    # Row-wise means for matching columns
+    means <- apply(chr_data[, cols, drop = FALSE], 1, function(x) mean(x, na.rm = TRUE))
+    return(means)
+  })
+  
+  # Convert to dataframe
+  population_means_chr_inv <- as.data.frame(population_means_chr_inv)
+  
+  # Add chromosome column
+  population_means_chr_inv$chr <- chr
+  
+  # Summarize the average for the chromosome
+  chromosome_avg <- colMeans(population_means_chr_inv[, -ncol(population_means_chr_inv)], na.rm = TRUE)
+  results_list_inv[[chr]] <- data.frame(chr = chr, t(chromosome_avg))
+}
+
+# Combine all chromosome results
+population_avg_per_chr_inv <- do.call(rbind, results_list_inv)
+
+# View final results
+print(population_avg_per_chr_inv)
+```
+
+```{r, message=FALSE, warning=FALSE}
+# join with gc_content_summary
+gc_cont_summary <- gc_cont_summary %>%
+                    left_join(population_avg_per_chr_inv, by= "chr")
+
+#pivot_longer for plotting
+gc_cont_summary_long <- gc_cont_summary %>%
+  pivot_longer(
+    cols = c(S, T, TV, E, Rr, Reu, G), # Columns to pivot
+    names_to = "pop",                 # New column for population names
+    values_to = "value"               # New column for values
+  )
+
+#Plot GC content vs. chromosome size
+gc_cont_summary$category <- cut(gc_cont_summary$max_bp,
+                                breaks = c(-Inf, 2000000, 20000000, Inf),
+                                labels = c("Micro (<2Mb)", "Intermediate (2-20Mb)", "Macro (>20Mb)"))
+
+gc_cont_summary_long_S <- gc_cont_summary_long %>% 
+  filter(pop == "S")
+
+# Plot the data by chromsome
+dot_plot <- ggplot(gc_cont_summary_long_S, aes(x = ave_gc_cont, y = value, color = pop, shape = category)) +
+  geom_point(size = 3) +
+  scale_color_manual(values =  c(#"#08d124", #E
+                "#07038a", #G
+                "#d30000", #R
+                "red", #Reu
+                "#be6400", #S
+                "#f4d000", #T
+                "#622a0f")) + #TV 
+  labs(x = "GC Content", 
+       y = "Average Pop methylation",
+       title = "Chromosome Length vs GC Content",
+       color = "Chromosome Category") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Plot the data
+dot_plot <- ggplot(gc_cont_summary_long_S, aes(x = ave_gc_cont, y = value, color = pop, shape = category)) +
+  geom_point(size = 3) +
+  scale_color_manual(values =  c(#"#08d124", #E
+                "#07038a", #G
+                "#d30000", #R
+                "red", #Reu
+                "#be6400", #S
+                "#f4d000", #T
+                "#622a0f")) + #TV 
+  labs(x = "GC Content", 
+       y = "Average Pop methylation",
+       # title = "Chromosome Length vs GC Content",
+       shape = "Chromosome Category") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size=16)) +
+  theme(axis.text.y = element_text(size=16)) +
+  theme(axis.title.y = element_text(size=16)) +
+  theme(axis.title.x = element_text(size=16)) 
+
+
+# Display the plot
+print(dot_plot)
+
+```
+```{r, message=FALSE, warning=FALSE}
+#plot in boxplot style
+# Reshape data to long format
+gc_cont_summary_long_S_long <- gc_cont_summary_long_S %>%
+  pivot_longer(cols = c(ave_gc_cont, value), 
+               names_to = "metric", 
+               values_to = "measurement")
+
+# Create the boxplot
+ggplot(gc_cont_summary_long_S_long, aes(x = category, y = measurement, fill = metric)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("tan", "skyblue")) +  # Adjust colors if needed
+ theme_minimal() +
+  labs(x = NULL, y = NULL, fill = "Metric") +  # Remove x-axis title
+  theme(
+    axis.text.x = element_text(size = 10),
+    axis.text.y = element_text(size = 12)# Increase label size
+  )
+
+```
