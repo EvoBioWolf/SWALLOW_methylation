@@ -1,0 +1,223 @@
+---
+title: "Sampling Maps"
+author: "Sarah Mueller"
+date: "2024"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library("sf")
+library("ggplot2")
+library("plyr")
+library("readxl")
+library("raster")
+library("broom")
+library("wesanderson")
+library("ggnewscale")
+library("dplyr")
+library("RColorBrewer")
+```
+
+## Sampling Map
+
+Here, I want to plot our sampling map with the distribution of barn swallow. We chose not to include the climate data as this was not significant in the RDA analysis 
+
+```{r warning=FALSE, message=FALSE}
+###load in shapefiles
+work.dir <- "/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_metadata/0.sample.maps/0_shapefiles"
+distr <- st_read("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_metadata/0.sample.maps/0_shapefiles/Birdlife.Distribution.shp")
+wrld <- st_read("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_metadata/0.sample.maps/0_shapefiles/ne_10m_admin_0_countries.shp")
+
+```
+I need to load in the sampling data and colors we will use.
+
+```{r message=FALSE, warning=FALSE}
+##sampling data, with metadata, lat, long included
+sampling <- read_xlsx("/dss/dsshome1/lxc0B/ra52qed/gitlab/swallow.projects/scripts/0_sample.lists/NCBI_info_updated_20220727_newlat.xlsx")
+sampling <- transform(sampling, count = table(geo_loc_name)[geo_loc_name])
+sampling$Latitude.approx <- as.numeric(sampling$Latitude.rustica.approx)
+sampling$Longitude.approx <- as.numeric(sampling$Longitude.rustica.approx)
+level_order <- c('savignii (SA)', 'transitiva (TR)', 'rustica (RUe)', 'rustica (RUr)',  'gutturalis (GU)', 'tytleri (TY)', 'erythrogaster (ER)', 'rustica-gutturalis','rustica-tytleri')
+
+sampling <- sampling %>%
+  mutate(sub.pop = case_when(
+    sub_species == "gutturalis" ~ "gutturalis (GU)",
+    sub_species == "tytleri" ~ "tytleri (TY)",
+    sub_species == "transitiva" ~ "transitiva (TR)",
+    sub_species == "erythrogaster" ~ "erythrogaster (ER)",
+    sub_species == "savignii" ~ "savignii (SA)",
+    sub_species == "rustica" & str_detect(count.geo_loc_name, "Russia") ~ "rustica (RUr)",
+    sub_species == "rustica" & str_detect(count.geo_loc_name, "Switzerland|Germany|Finland") ~ "rustica (RUe)",
+    sub_species == "rustica-gutturalis" ~ "rustica-gutturalis",
+    sub_species == "rustica-tytleri" ~ "rustica-tytleri",
+    TRUE ~ NA_character_
+  ))
+
+sampling <- sampling %>%
+  mutate(sub.group = case_when(
+    sub.pop %in% c("gutturalis (GU)","tytleri (TY)","transitiva (TR)","erythrogaster (ER)","savignii (SA)","rustica (RUe)", "rustica (RUr)") ~ "Subspecies",
+    sub.pop %in% c("rustica-gutturalis","rustica-tytleri") ~ "Hybrid zones"
+  ))
+
+#remove hybrids
+#sampling <- sampling %>%
+#  filter(!sub_species %in% c('rustica-gutturalis', 'rustica-tytleri'))
+
+#define colors for mapping, exported from GIS
+seasonal_colors <- c("1" = "darkorange",  # Native Resident
+                     "2" = "#fceea7", # Native Breeding
+                     "3" = "#046C9A",  # Native Non-breeding
+                     "4" = "#40e0d0") 
+#subspecies palette
+pal.species <- c( "#be6400", #S
+                 "#622a0f", #TV
+                "#d30000", #R
+                "#d30000", #R
+                "#00316e", #G
+                "#f4d000", #T
+                "#39ad48", #E
+                "#9716a8", #RG
+                "#FFA500", #RT
+                "grey") #NA/unknown
+
+pal.color =  c( "grey", #S
+                 "grey", #TV
+                "grey", #R
+                "grey", #R
+                "#00316e", #G
+                "grey", #T
+                "grey", #E
+                "grey", #RG
+                "grey", #RT
+                "grey") #NA/unknown
+
+legend.species= c("savignii (SA)"=21, "transitiva (TR)"=23, "rustica (RUe)"=22, 
+                  "rustica (RUr)"=24, "gutturalis (GU)"=3, "tytleri (TY)"=24, "erythrogaster (ER)"=25, 
+                  "rustica-gutturalis"=21, "rustica-tytleri"=21)
+```
+
+Now I would like to plot the world map and distribution of the barn swallow, zooming in on our specific sampling locations.
+
+```{r warning=FALSE, message=FALSE}
+plot <- ggplot() +
+  geom_sf(data = wrld, color = "grey33", fill = "white", size = 0.2) +  # world map with black borders
+  geom_sf(data = distr, aes(fill = factor(SEASONAL)), color = NA, alpha = 0.6) +  # distribution with transparency
+scale_fill_manual(name = "Seasonal Distribution",   # Add legend title for seasonal distribution
+                    values = seasonal_colors, 
+                    labels = c("Native Resident", "Native Breeding", "Native Non-breeding", "Passage")) +  # custom colors and labels 
+  coord_sf(xlim = c(-130, 130), ylim = c(-10, 75), expand = FALSE) +  # zoom into the specified region
+  theme_minimal() +
+  theme(axis.text = element_text(size = 10),  # axis text size
+        axis.title = element_blank(),  # remove axis titles
+        axis.ticks = element_line(size = 0.5),  # add axis ticks
+        panel.grid.major = element_blank(),  # grid lines for longitude/latitude
+        panel.grid.minor = element_blank(),  # remove minor grid lines
+        legend.position = "right",  # place the legend on the right
+        legend.title = element_text(size = 18),  # remove legend title
+        legend.text = element_text(size = 16),  # smaller legend text
+        legend.key.size = unit(0.5, "cm"),  # smaller legend keys
+        plot.title = element_blank()) +  # remove plot title
+  scale_x_continuous(breaks = seq(-130, 130, by = 80)) +  # x-axis ticks every 40 degrees
+  scale_y_continuous(breaks = seq(-10, 75, by = 40))+
+  new_scale("fill") + 
+    geom_point(data = sampling, aes(x = Longitude.approx, y = Latitude.approx, fill = factor(sub.pop, levels = level_order)), 
+             size = 4, pch = 21, stroke = 0.15) +
+  scale_fill_manual(name = "Subspecies",   # Add legend title for subspecies
+                    values = pal.species)
+
+plot
+
+```
+
+
+#Plot nicer
+```{r}
+
+plot <- ggplot() +
+  geom_sf(data = wrld, color = "grey33", fill = "white", size = 0.2) +
+  
+  # suppress legend for distribution polygons
+  geom_sf(data = distr, aes(fill = factor(SEASONAL)), 
+          color = NA, alpha = 0.6, show.legend = FALSE) + 
+  
+  scale_fill_manual(name = "Seasonal Distribution",
+                    values = seasonal_colors,
+                    labels = c("Native Resident", "Native Breeding", 
+                               "Native Non-breeding", "Passage")) +
+  coord_sf(xlim = c(-130, 130), ylim = c(-10, 75), expand = FALSE) +
+
+  # Combined points (keep legend here)
+  new_scale_fill() +
+  new_scale_color() +
+  geom_point(data = sampling,
+             aes(x = Longitude.approx, y = Latitude.approx,
+                 fill = sub.pop, shape = sub.pop),
+             size = 4, stroke = 0.15) +
+  scale_fill_manual(name = "Population", values = pal.species) +
+  scale_color_manual(name = "Population", values = pal.color) +
+  scale_shape_manual(name = "Population", values = legend.species) +
+  theme_minimal()+
+   theme(axis.text = element_text(size = 10),  # axis text size
+        axis.title = element_blank(),  # remove axis titles
+        axis.ticks = element_line(size = 0.5),  # add axis ticks
+        panel.grid.major = element_blank(),  # grid lines for longitude/latitude
+        panel.grid.minor = element_blank(),  # remove minor grid lines
+        legend.position = "right",  # place the legend on the right
+        legend.title = element_text(size = 18),  # remove legend title
+        legend.text = element_text(size = 16),  # smaller legend text
+        legend.key.size = unit(0.5, "cm"),  # smaller legend keys
+        plot.title = element_blank()) # remove plot title
+
+
+plot
+```
+
+```{r}
+ggsave("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_metadata/Figure1_sampling_whyb.png", plot = plot, width = 15, height = 4)
+```
+
+Now I would like to zoom in on the hybrid zone region
+
+```{r warning=FALSE, message=FALSE}
+#Remove non-parentals
+#remove hybrids
+sampling <- sampling %>%
+  filter(sub_species %in% c('rustica','rustica-tytleri', 'rustica-gutturalis', 'tytleri', 'gutturalis'))
+
+#Update colors
+#subspecies palette
+pal.species <- c("#d30000", "#9716a8","#00316e","#FFA500","#f4d000","grey", "grey22", "grey33") #NA/unknown
+
+zoom.plot <- ggplot() +
+  geom_sf(data = wrld, color = "grey33", fill = "white", size = 0.2) +  # world map with black borders
+  geom_sf(data = distr, aes(fill = factor(SEASONAL)), color = NA, alpha = 0.6) +  # distribution with transparency
+scale_fill_manual(name = "Seasonal Distribution",   # Add legend title for seasonal distribution
+                    values = seasonal_colors, 
+                    labels = c("Native Resident", "Native Breeding", "Native Non-breeding", "Passage")) +  # custom colors and labels 
+  coord_sf(xlim = c(40, 130), ylim = c(15, 70), expand = FALSE) +  # zoom into the specified region
+  theme_minimal() +
+  theme(axis.text = element_text(size = 10),  # axis text size
+        axis.title = element_blank(),  # remove axis titles
+        axis.ticks = element_line(size = 0.5),  # add axis ticks
+        panel.grid.major = element_blank(),  # grid lines for longitude/latitude
+        panel.grid.minor = element_blank(),  # remove minor grid lines
+        legend.position = "right",  # place the legend on the right
+        legend.title = element_text(size = 16),  # remove legend title
+        legend.text = element_text(size = 14),  # smaller legend text
+        legend.key.size = unit(0.5, "cm"),  # smaller legend keys
+        plot.title = element_blank()) +  # remove plot title
+  scale_x_continuous(breaks = seq(40, 130, by = 40)) +  # x-axis ticks every 40 degrees
+  scale_y_continuous(breaks = seq(20, 70, by = 30))+
+  new_scale("fill") + 
+    geom_point(data = sampling, aes(x = Longitude.approx, y = Latitude.approx, fill = factor(sub_species, levels = level_order)), 
+             size = 8, pch = 21, stroke = 0.15) +
+  scale_fill_manual(name = "Subspecies",   # Add legend title for subspecies
+                    values = pal.species)
+
+zoom.plot
+```
+```{r}
+ggsave("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_metadata/Figure3_sampling_whyb_zoom.png", plot = zoom.plot, width = 8, height = 8)
+```
