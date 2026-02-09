@@ -1,0 +1,365 @@
+---
+title: "Hybrid Models (RG)"
+author: "Sarah Mueller"
+date: "2025-06-16"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+### Libraries
+
+listOfPackages <- c("ggplot2","reshape2","here", "ggforce", "matrixStats","viridis","readr","vegan","factoextra","readxl", "tidyverse","dplyr", "plotly", "GGally","ggpubr","ggrepel", "data.table", "missMDA", "gghalves", "ggdist", "DHARMa", "betareg", "lmtest", "car")
+
+for (i in listOfPackages){
+  if(! i %in% installed.packages()){
+    install.packages(i, dependencies = TRUE)
+  }
+  require(i,character.only=TRUE)
+}
+
+```
+
+## Load genome information.
+
+```{r}
+category <- read.delim("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_Pre-processing/4_methyl_calling/1_CpG_islands/168.20miss/homer.cpgi.prop.168.merged.20miss.rmlowv.rmout.txt", header=T)
+
+#separate chr and pos columns
+category <- category %>%
+  separate(loci.id, into = c("chr", "pos"), sep = "_", remove = FALSE) %>%
+  distinct(chr, pos, .keep_all = TRUE) %>%
+  mutate(pos = as.numeric(pos))
+
+#get rid of leading and trailing white spaces
+category$category <- trimws(category$category)
+
+#specify region
+category <- category %>%
+  mutate(region = sub("_.*", "", category))
+
+info <- read_xlsx("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_metadata/hirundo_WGS_sampling_metadata_10.10.22_sm.xlsx")
+
+rename_file <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/vcf/Safran_lab/invariant_vcf/0_vcf_sample_rename.txt", header=F, sep= "\t")
+colnames(rename_file) <- c("id.safran", "id.wolf")
+
+info <- info %>%
+  filter(`project sample` %in% rename_file$id.safran)
+
+info <- left_join(rename_file, info, by = c("id.safran" = "project sample"))
+
+rg_admix <- info %>%
+  filter(grepl("_G_|_R_|_RG_", id.wolf))
+
+
+##grab local ancetry information
+local_anc <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/5_WGS/2_hybrid_index/1_introgress/1_RG_local_ancestry_HI.txt", header=T)
+
+global.anc <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/5_WGS/2_hybrid_index/1_introgress/1_RG_global_ancestry_informative_HI.txt", header=T)
+
+local_SNP <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/5_WGS/2_hybrid_index/1_introgress/1_RG_local_nearest_SNP_maf1.txt", header=T)
+
+```
+
+## Load PST information for the parental population comparisons for the hybrid zone
+
+Looking at highest PST differences between RGT and looking at these sites in hybrids
+
+```{r, message=FALSE, warning=FALSE}
+tukey_results <- read.delim("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/4_RGT_Hybrids/3_methylation_models/RG_hyb/RG_diff/0_RG_parental_hybrid_tukey_results.txt", header=T)
+
+```
+
+## Load methylation data
+```{r}
+prop.hyb <- read.delim("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_Pre-processing/4_methyl_calling/1_CpG_islands/168.20miss/homer.cpgi.prop.168.merged.20miss.rmlowv.rmout.txt", header=T)
+
+```
+
+## Grab significant loci from the ANOVA tests for the RG comparison
+```{r}
+#keep only revelvant info from category
+category <- category %>% dplyr::select(region.id, n_cpgs, Annotation, category, region)
+##Combine the category w/ selected loci
+cpg_loci <- left_join(tukey_results, category, by= c("site.id" = "region.id"))
+
+#Combine this with methylation data
+cpg_loci <- left_join(cpg_loci, prop.hyb, by = c("site.id" = "region.id"))
+
+cpg_loci <- cpg_loci %>%
+  dplyr::select(!contains("DE_") & !contains("CH_") & !contains("FI_") & !contains("_T_") & !contains("_RT_") & !contains("_S_") & !contains("_TV_") & !contains("_E_") & !starts_with("RU_"))
+
+# Remove "ME_" from the start of any column name in pst_rg
+colnames(cpg_loci) <- gsub("^ME_", "", colnames(cpg_loci))
+```
+
+## Model Testing
+
+I want to determine if cis- or trans- acting (or environmental/spatial) components influence methylation proportion at sites significantly different between the three groups (parent1, hybrids, parent2). Therefore, I want to run a model that take methylation prop ~ genome-wide HI + local HI (10kb surrounding focal region) + nearest_SNP (maf >0.1)
+
+```{r}
+##Format Data
+#I need all individuals in rows ad then any defining variables in columns
+#I will start with the response variable aka methylation
+meth.loci <- cpg_loci %>% dplyr::select(contains("_ADL_"))
+rownames(meth.loci) <- cpg_loci$site.id
+meth.loci <- as.data.frame(t(meth.loci))
+meth.loci$id <- rownames(meth.loci)
+
+#Next the global admixture proportions and longitude/latitude data
+rg_admix <- rg_admix %>% dplyr::select(id.wolf, latitude, longitude, sex, proportion_rustica_ancestry)
+
+#Global HI
+global_HI <- as.data.frame((global.anc))
+global_HI$id <- global_HI$sample
+
+#Next local HI
+local_anc_for <- as.data.frame(t(local_anc))
+local_anc_for$id <- rownames(local_anc_for)
+
+#Local nearest SNP
+#check distances
+local_SNP <- local_SNP %>%
+  separate(site_id, into = c("chr", "start", "end"), remove = F) %>%
+  mutate(distance = as.numeric(pos) - as.numeric(start))
+
+#format correctly
+local_SNP_for <- as.data.frame(t(local_SNP[,6:75]))
+colnames(local_SNP_for) <- paste0(local_SNP$site_id, ".snp")
+local_SNP_for$id <- rownames(local_SNP_for)
+
+#Combine data
+total_data <- left_join(meth.loci, rg_admix, by = c("id" = "id.wolf"))
+total_data <- left_join(total_data, local_anc_for, by = "id",  suffix = c(".meth", ".local"))
+total_data <- total_data %>%
+  rename_with(
+    ~ ifelse(
+      str_starts(.x, "chr") & !str_detect(.x, "\\.(meth|local)$"),
+      paste0(.x, ".meth"),
+      .x
+    )
+  )
+
+total_data <- left_join(total_data, local_SNP_for, by = "id")
+total_data$sex <- gsub("m\\?", "m", total_data$sex)
+total_data <- left_join(total_data, global_HI, by = "id")
+
+#Keep only hybrids
+total_data <- total_data %>% filter(grepl("_RG_",id))
+```
+
+##Use quasi-binomial model to loop through all loci and create a table of summary statistics
+
+```{r}
+# --- 0. Prepare data (pre-checks) ---
+# Ensure all columns that will be used are numeric.
+# Ensure no values are outside (0,1)
+RG.model.loci <- total_data %>%
+  mutate(across(starts_with("chr"), ~ as.numeric(as.character(.))))
+
+# Ensure predictors are numeric
+RG.model.loci$longitude <- as.numeric(RG.model.loci$longitude)
+RG.model.loci$proportion_rustica_ancestry <- as.numeric(RG.model.loci$proportion_rustica_ancestry)
+RG.model.loci$all_vcf <- as.numeric(RG.model.loci$h)
+
+# --- 1. Identify site.id columns ---
+chr_columns <- names(RG.model.loci)[endsWith(names(RG.model.loci), ".meth")]
+
+# Initialize an empty list to store results for each model
+all_model_results <- list()
+
+# --- 2. Loop through each site.id column ---
+for (response_col in chr_columns) {
+
+  cat("Processing column:", response_col, "\n") # Print progress
+
+  # Extract the base name by removing the ".meth" suffix
+  base_name <- sub("\\.meth$", "", response_col)
+
+  # Construct the local predictor name
+  local_predictor <- paste0(base_name, ".local")
+  snp_predictor <- paste0(base_name, ".snp")
+
+  # Check if the local predictor exists in the dataset
+  if (local_predictor %in% colnames(RG.model.loci)) {
+    formula_str <- paste(response_col, "~ all_vcf +", local_predictor, "+", snp_predictor)
+  } else {
+    formula_str <- paste(response_col, "~ all_vcf +", snp_predictor)
+  }
+
+  # Construct the formula
+  fml <- as.formula(formula_str)
+
+  # Fit the GLM with tryCatch
+  model_fit <- tryCatch({
+    glm(fml, family = quasibinomial(link = "logit"), data = RG.model.loci)
+  }, error = function(e) {
+    message(paste("Error fitting model for", response_col, ":", e$message))
+    return(NULL)
+  })
+
+  # Proceed only if the model fitted successfully
+  if (!is.null(model_fit)) {
+    model_summary <- tidy(model_fit) %>%
+      mutate(response_variable = response_col) %>%
+      dplyr::select(response_variable, term, estimate, std.error, statistic, p.value)
+
+    overall_model_metrics <- glance(model_fit) %>%
+      mutate(response_variable = response_col) %>%
+      dplyr::select(response_variable, deviance, df.residual, AIC, BIC, nobs)
+
+    # Store both in the list
+    all_model_results[[response_col]] <- list(
+      coefficients = model_summary,
+      overall = overall_model_metrics
+    )
+  }
+}
+
+# --- 3. Combine results into a single data frame ---
+# Combine coefficient summaries from all models
+glm.full.output_coefficients <- bind_rows(
+  lapply(all_model_results, function(x) x$coefficients)
+)
+
+# Combine overall model metrics from all models
+glm.full.output_overall_metrics <- bind_rows(
+  lapply(all_model_results, function(x) x$overall)
+)
+
+# --- 4. Display or save the results ---
+print("--- Coefficients Summary ---")
+print(glm.full.output_coefficients)
+
+print("\n--- Overall Model Metrics Summary ---")
+print(glm.full.output_overall_metrics)
+
+# Join coefficients with overall metrics for a single comprehensive table per site:
+glm.full.output <- left_join(glm.full.output_coefficients, glm.full.output_overall_metrics, by = "response_variable")
+print("\n--- Combined GLM Full Output (Coefficients + Overall Metrics) ---")
+print(glm.full.output)
+
+##Calculate dispersion parameter
+glm.full.output <- glm.full.output %>%
+  mutate(dispersion_parameter = deviance / df.residual)
+
+#If  >1, it indicates overdispersion,  <1 it indicates underdispersion,  ≈1, the variance structure is similar to a standard binomial.
+
+hist(glm.full.output$p.value)
+sum(glm.full.output$p.value < 0.05, rm.na=T)
+
+glm.full.output.admix <- glm.full.output %>%
+  filter(term == "all_vcf")
+
+hist(glm.full.output.admix$p.value)
+sum(glm.full.output.admix$p.value < 0.05)
+nrow(glm.full.output.admix)
+
+glm.full.output.admix.sig <- glm.full.output.admix %>% filter(p.value < 0.05)
+
+glm.full.output.local <- glm.full.output %>%
+  filter(str_ends(term, "local"))
+
+hist(glm.full.output.local$p.value)
+glm.full.output.local <- glm.full.output.local %>% filter(!is.na(p.value))
+sum(glm.full.output.local$p.value < 0.05)
+nrow(glm.full.output.local)
+
+glm.full.output.snp <- glm.full.output %>%
+  filter(str_ends(term, "snp"))
+
+hist(glm.full.output.snp$p.value)
+glm.full.output.snp <- glm.full.output.snp %>% filter(!is.na(p.value))
+sum(glm.full.output.snp$p.value < 0.05)
+nrow(glm.full.output.snp)
+
+glm.full.output.snp.sig <- glm.full.output.snp %>% filter(p.value < 0.05)
+
+#Total Model
+glm.full.output.t <- glm.full.output %>%
+  filter(term == "(Intercept)")
+
+hist(glm.full.output.t$p.value)
+sum(glm.full.output.t$p.value < 0.05)
+nrow(glm.full.output.t)
+
+
+###Summarize terms
+
+glm_summary <- glm.full.output %>%
+  # Standardize term names
+  mutate(term = if_else(str_ends(term, ".local"), "local_ancestry", term)) %>%
+  mutate(term = if_else(str_ends(term, ".snp"), "nearest_SNP", term)) %>%
+  # Remove intercept if you want to summarize only predictors
+  filter(term != "(Intercept)") %>%
+  group_by(term) %>%
+  summarise(
+    n_loci         = n(),                             # total number of loci this term appears in
+    mean_estimate  = mean(estimate, na.rm = TRUE),
+    median_estimate = median(estimate, na.rm = TRUE),
+    sd_estimate    = sd(estimate, na.rm = TRUE),
+    n_significant  = sum(p.value < 0.05, na.rm = TRUE), # number of loci with significant effect
+    prop_significant = n_significant / n_loci           # proportion of loci significant
+  ) %>%
+  arrange(desc(prop_significant))
+
+glm_summary
+```
+
+save results
+```{r}
+write.table(glm_summary, "/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/4_RGT_Hybrids/3_methylation_models/RG_hyb/RG_models/1_RG_model_output_summary.txt", quote=F)
+```
+
+Which sites are significant
+
+```{r}
+
+glm_join <- left_join(glm.full.output.admix, glm.full.output.local, by = "response_variable")
+glm_join <- left_join(glm_join, glm.full.output.snp, by = "response_variable")
+glm_join <- glm_join %>%
+            separate(response_variable, into = c("site.id", "extra"), sep = "\\.")
+
+glm_join <- left_join(glm_join, cpg_loci, by = "site.id")
+
+glm.join.sig.admix <- glm_join %>% filter(p.value.x < 0.05)
+
+glm.join.sig.local <- glm_join %>% filter(p.value.y < 0.05)
+
+glm.join.sig.snp <- glm_join %>% filter(p.value < 0.05)
+
+glm.output.sig <- rbind(glm.join.sig.admix, glm.join.sig.local, glm.join.sig.snp)
+
+
+```
+
+```{r}
+#save results
+write.table(glm.output.sig, "/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/4_RGT_Hybrids/3_methylation_models/RG_hyb/RG_models/1_RG_model_output_sig.txt", sep = "\t", quote=F, row.names=F)
+```
+
+Look at distances of nearest SNPs 
+
+```{r}
+glm.full.output.snp.sig <- glm.full.output.snp.sig %>%
+  mutate(term = str_remove(term, "\\.snp$")) 
+
+glm.distances.sig <- left_join(glm.full.output.snp.sig, local_SNP, by = c("term" = "site_id"))
+
+glm.distances.sig <- glm.distances.sig %>% 
+   filter(distance != min(distance, na.rm = TRUE))
+
+glm.full.output.snp <- glm.full.output.snp %>%
+  mutate(term = str_remove(term, "\\.snp$"))
+
+glm.distances <- left_join(glm.full.output.snp, local_SNP, by = c("term" = "site_id"))
+
+summary(abs(glm.distances.sig$distance))
+```
+
+```{r}
+#save results
+write.table(glm.distances.sig, "/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/4_RGT_Hybrids/3_methylation_models/RG_hyb/RG_models/1_RG_model_output_sig_snp_dist.txt", sep = "\t", quote=F, row.names=F)
+```
+

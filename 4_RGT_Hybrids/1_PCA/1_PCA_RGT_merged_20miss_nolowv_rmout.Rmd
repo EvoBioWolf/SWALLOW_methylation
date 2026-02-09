@@ -1,0 +1,329 @@
+---
+title: "PCA.RRBS"
+author: "Sarah Mueller"
+date: "2023-04-14"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+### Libraries
+
+listOfPackages <- c("ggplot2","reshape2","here", "ggforce", "matrixStats","viridis","readr","vegan","factoextra","readxl", "tidyverse","dplyr", "plotly", "GGally","ggpubr","ggrepel", "missMDA")
+
+for (i in listOfPackages){
+  if(! i %in% installed.packages()){
+    install.packages(i, dependencies = TRUE)
+  }
+  require(i,character.only=TRUE)
+}
+
+```
+
+## Set up data for PCA
+
+First, we want to set some variables depending on the samples we want to use in the PCA, etc. change these before running the analysis
+
+```{r,warning=FALSE}
+# define input variables -------
+
+#quick sample information
+pop <- read.table("/dss/dsshome1/lxc0B/ra52qed/gitlab/swallow.projects/scripts/0_sample.lists/sample.names.RGT.sub.pop.txt", header=T)
+
+#any other metadata to be included
+info <- read_xlsx("/dss/dsshome1/lxc0B/ra52qed/gitlab/swallow.projects/scripts/0_sample.lists/NCBI_info_updated_20220727.xlsx")
+#number of samples
+N = 35
+
+#color palettes for plotting
+color_sub <- c( #"#810070", #E
+                "#00316e", #G
+                "#d30000", #R
+                #"#9716a8", #RG
+                #"#FFA500", #RT
+                #"#be6400", #S
+                "#f4d000", #T
+                #"#622a0f", #TV
+                "grey") #NA/unknown
+
+```
+
+## Load in methylation data
+
+Here, we can also specify a subset of samples if there are individuals we want to exclude
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+##load in methylkit object
+prop.168.20miss.merged <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_Pre-processing/4_methyl_calling/0_all_sites/168.20miss/prop.168.merged.20miss.rmlowv.rmout.txt", header = T)
+```
+
+```{r message=FALSE, warning=FALSE}
+#create percent methylation df
+prop.df <- prop.168.20miss.merged
+
+prop.df <- prop.df %>%
+  dplyr::select(contains("RU_13_R_") | contains("_G_") | contains("_T_"))
+
+```
+
+Calculate only sites that show +/- 10% diff in methylation and use those for PCA??
+
+```{r, message=FALSE, warning=TRUE}
+# Define population groups based on column substrings
+population_groups <- list(
+  Rr= "RU_13_R_",
+  G = "_G_",
+  T = "_T_"
+)
+
+# Calculate the mean for each population group
+population_means <- sapply(names(population_groups), function(pop) {
+  cols <- grep(population_groups[[pop]], colnames(prop.df), value = TRUE)
+  if (length(cols) == 0) return(NULL) # If no columns match, return NULL
+  
+  means <- apply(prop.df[, cols, drop = FALSE], 1, function(x) mean(x, na.rm = TRUE))
+  return(means)
+})
+
+# Assign column names to the calculated means
+colnames(population_means) <- names(population_groups)
+population_means <- as.data.frame(population_means)
+```
+
+```{r message=FALSE,warning=FALSE}
+# Function to check if any pair of columns has at least a 10% difference
+has_10_percent_difference <- function(row) {
+  combs <- combn(row, 2) # Generate all combinations of two columns
+  return(any(abs(combs[1, ] - combs[2, ]) >= 0.05))
+}
+
+# Add a new column to the dataframe
+prop.df$difference_10_percent <- apply(population_means, 1, has_10_percent_difference)
+population_means$difference_10_percent <- apply(population_means, 1, has_10_percent_difference)
+
+#clean dataframe for sites with less than 10% difference
+prop <- prop.df[prop.df$difference_10_percent == TRUE, ]
+prop <- prop[,c(1:35)]
+```
+
+
+## Run the PCA
+
+```{r, include=FALSE, message=FALSE, warning=FALSE}
+#Make sure all are numeric
+prop[] <- lapply(prop, function(x) {
+  if (is.factor(x) || is.character(x)) {
+    as.numeric(as.character(x))
+  } else {
+    x
+  }
+})
+
+#Either remove missing data or impute below
+prop$na <- apply(prop, 1, function(row) any(is.na(row)))
+prop_clean <- prop[prop$na == FALSE, ]
+prop_clean <- prop_clean[,c(1:35)]
+
+#Impute missing values using missMDA package
+#prop_impute <- imputePCA(prop, ncp=2, method="EM")
+#prop_comobs <- as.data.frame(prop_impute$completeObs)
+
+# run a PCA on the sample matrix -----
+prcomp.out <- prcomp(t(prop_clean), center = T)
+summary(prcomp.out)
+
+#Get eigen values and vectors -----
+pca <- as.data.frame(prcomp.out$x)
+#eigenval <- ((apply(prcomp.out$x, 2, var))/sum(apply(prcomp.out$x, 2, var)))*100
+
+###eigenvalue calculation because above encountered isses even on test data and points where there should be no issues
+n_components <- ncol(prcomp.out$x)
+# Step 2: Initialize a vector to store variances
+variances <- numeric(n_components)
+# Step 3: Calculate the variance for each principal component manually
+for (i in 1:n_components) {
+  variances[i] <- stats::var(prcomp.out$x[, i])
+}
+# Step 4: Compute the total variance
+total_variance <- sum(variances)
+# Step 5: Calculate the eigenvalue percentages
+eigenval <- (variances / total_variance) * 100
+
+# Clean-up data -------
+# set names
+#for keeping only a subset
+pca <- cbind(pop$V1, pca)
+names(pca)[1] <- "ind"
+# join pop data to pca results
+pca <- dplyr::left_join(pca, pop, by = c('ind' = 'V1'))
+
+# add any other metadata to columns
+info$sample_name=as.character(info$sample_name)
+info=info %>% dplyr::slice(match(pop$V1, info$sample_name))
+
+pca <- left_join(pca, info, by=c("ind" = "sample_name"))
+
+```
+
+## Plotting PCA axes
+
+Here, we can use a function that plots the PCA so we can plot several at once
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# def functions --------
+plot.pca <- function(data,X,Y, colors, plot_title){
+    p <- ggplot(data = data, aes_string(x=X, y=Y, fill= "sub", color = "sub", label="ind",shape="sex.rrbs")) + 
+      geom_point(size=4) +
+      theme_bw() +
+      scale_fill_manual(values=colors, na.translate = FALSE) +
+      scale_color_manual(values=c("grey33", "#00316e", "grey33", "grey33", "grey33", "grey33", "grey33", "grey33"), na.translate = FALSE) +
+      #scale_shape_manual(values=c(3,21,7,22,8,23:25))+
+      scale_shape_manual(values=c(21, 22, 24), na.translate = FALSE)+
+      #ylab(paste0(Y ,"(", signif(pve$pve[pve$PC==Y], 3), "%)")) +
+      #xlab(paste0(X ,"(", signif(pve$pve[pve$PC==X], 3), "%)")) +
+      #ylim(-0.3,0.2) +
+      labs(fill="",shape="")  +
+      ggtitle(plot_title) +
+      theme(plot.title = element_text(hjust = 0.5),   # Center the title
+      panel.grid.major = element_blank(), 
+      panel.grid.minor = element_blank(),
+      legend.position = "bottom",               # Move legend to the bottom
+      legend.title = element_blank(), 
+      legend.box="vertical", 
+      legend.margin=margin()) +
+      guides(
+      color = FALSE,      
+      fill = guide_legend(override.aes = list(shape=21), nrow = 1, byrow = TRUE),  
+      shape = guide_legend(nrow = 1, byrow = TRUE)   
+    )
+    
+    return(p)
+}
+
+##this looks at the eigenvalues and the percent of variance explained by each PC axis
+plot.pve <- function(pve){
+   pve.p <- ggplot(data=pve, aes(x=PC, y=pve)) +
+    geom_bar(stat="identity", fill="#418979") + 
+    theme_bw()  +
+    ylab("Explained variation (%)") +
+    xlab("Principal Component") +
+    ggtitle("Scree plot - PCA ")+
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+  
+  return(pve.p)
+}
+
+```
+
+### Cumulative variance of components
+
+Here we want to plot the amount of variance described by each PC axis. We do this by using the eigenvalues and converting this to a percentage of variance.
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+#Plot cumulative variance of components
+pve <- data.frame(PC = paste0("PC", 1:(ncol(pca)-(ncol(info)+2))), pve = eigenval/sum(eigenval)*100)
+pve$PC <- factor(pve$PC, levels=unique(pve$PC))
+ggplotly(plot.pve(pve))
+```
+
+
+### Plot PCA
+
+We can make plots looking at the first 3 axes of the PCA.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+#first define the colors you want to use, this needs to be equal to the number of populations or subspecies. For the moment the script is only set up to use color,but could be extended.
+
+  
+
+
+#Plot first 3 PCA combos 
+p1 <- plot.pca(pca, "PC1","PC2", color_sub, "RRBS")
+p2 <- plot.pca(pca, "PC1","PC3", color_sub, "RRBS")
+p3 <- plot.pca(pca, "PC2","PC3", color_sub, "RRBS")
+p4 <- plot.pca(pca, "PC3","PC4", color_sub, "RRBS")
+p5 <- plot.pca(pca, "PC2","PC4", color_sub, "RRBS")
+p6 <- plot.pca(pca, "PC4","PC5", color_sub, "RRBS")
+
+p1
+p2
+p3
+p4
+p5
+p6
+
+```
+##PCA loadings
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+#look at loadings
+loadings <- as.data.frame(prcomp.out$rotation)
+#plot
+dnam_sites <- rownames(prcomp.out$rotation)
+
+#get site.id column
+prop.load <- prop.df
+prop.load <- cbind(prop.168.20miss.merged$site.id, prop.load)
+prop.load <- prop.load[prop.load$difference_10_percent == TRUE, ]
+prop.load$na <- apply(prop.load, 1, function(row) any(is.na(row)))
+prop.load <- prop.load[prop.load$na == FALSE, ]
+
+df_loadings <- data.frame(dnam = prop.load$`prop.168.20miss.merged$site.id`, PC1_loadings = loadings$PC1, PC2_loadings = loadings$PC2, PC3_loadings = loadings$PC3)
+
+ggplot(df_loadings, aes(x = dnam, y = PC1_loadings)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(x = "DNAm Site", y = "PC1 Loadings") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ggtitle("PC1 Loadings")
+
+ggplot(df_loadings, aes(x = dnam, y = PC2_loadings)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(x = "DNAm Site", y = "PC1 Loadings") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ggtitle("PC1 Loadings")
+
+ggplot(df_loadings, aes(x = dnam, y = PC3_loadings)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(x = "DNAm Site", y = "PC1 Loadings") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ggtitle("PC1 Loadings")
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+#filter the loadings to only look at the top 1%
+df_loadings$PC1_loadings <- abs(df_loadings$PC1_loadings) 
+df_loadings$PC2_loadings <- abs(df_loadings$PC2_loadings) 
+df_loadings$PC3_loadings <- abs(df_loadings$PC3_loadings) 
+
+#filter for only top loadings
+filtered_loadings <- df_loadings %>%
+  filter(PC1_loadings >= quantile(PC1_loadings, 0.9999))
+
+ggplot(filtered_loadings, aes(x = dnam, y = PC1_loadings)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(x = "DNAm Site", y = "PC1 Loadings") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ggtitle("PC1 Loadings")
+
+#filter for only top loadings
+filtered_loadings <- df_loadings %>%
+  filter(PC2_loadings >= quantile(PC2_loadings, 0.999))
+
+ggplot(filtered_loadings, aes(x = dnam, y = PC2_loadings)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(x = "DNAm Site", y = "PC1 Loadings") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ggtitle("PC2 Loadings")
+
+#filter for only top loadings
+filtered_loadings <- df_loadings %>%
+  filter(PC3_loadings >= quantile(PC3_loadings, 0.999))
+
+ggplot(filtered_loadings, aes(x = dnam, y = PC3_loadings)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(x = "DNAm Site", y = "PC1 Loadings") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ggtitle("PC3 Loadings")
+
+```
+
+

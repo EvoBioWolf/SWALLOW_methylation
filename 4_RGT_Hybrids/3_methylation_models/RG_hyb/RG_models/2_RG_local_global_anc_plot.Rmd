@@ -1,0 +1,373 @@
+---
+title: "RG.hybrids"
+author: "Sarah Mueller"
+date: "2025-06-16"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+### Libraries
+
+listOfPackages <- c("ggplot2","reshape2","here", "ggforce", "matrixStats","viridis","readr","vegan","factoextra","readxl", "tidyverse","dplyr", "plotly", "GGally","ggpubr","ggrepel", "data.table", "missMDA", "gghalves", "ggdist")
+
+for (i in listOfPackages){
+  if(! i %in% installed.packages()){
+    install.packages(i, dependencies = TRUE)
+  }
+  require(i,character.only=TRUE)
+}
+
+```
+
+##Load results
+
+```{r, message=FALSE, warning=FALSE}
+model_results <- read.delim("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/4_RGT_Hybrids/3_methylation_models/RG_hyb/RG_models/1_RG_model_output_sig.txt", header=T)
+
+info <- read_xlsx("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_metadata/hirundo_WGS_sampling_metadata_10.10.22_sm.xlsx")
+
+rename_file <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/vcf/Safran_lab/invariant_vcf/0_vcf_sample_rename.txt", header=F, sep= "\t")
+colnames(rename_file) <- c("id.safran", "id.wolf")
+
+info <- info %>%
+  filter(`project sample` %in% rename_file$id.safran)
+
+info <- left_join(rename_file, info, by = c("id.safran" = "project sample"))
+
+rg_admix <- info %>%
+  filter(grepl("_G_|_R_|_RG_", id.wolf))
+
+
+##grab local ancestry information
+local_anc <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/5_WGS/2_hybrid_index/1_introgress/1_RG_local_ancestry_HI.txt", header=T)
+
+local_anc$site.id <- rownames(local_anc)
+local_anc <- local_anc %>% filter(site.id %in% model_results$site.id)
+local_anc <- as.data.frame(t(local_anc))
+local_anc$sample_id <- rownames(local_anc)
+
+##nearest SNP info
+near_SNP <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/5_WGS/2_hybrid_index/1_introgress/1_RG_local_nearest_SNP_maf1.txt", header=T)
+
+near_SNP <- near_SNP %>% filter(site_id %in% model_results$site.id)
+near_SNP <- as.data.frame(t(near_SNP))
+near_SNP$sample_id <- rownames(near_SNP)
+colnames(near_SNP) <- near_SNP[1,]
+
+##global HI
+global_anc <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/5_WGS/2_hybrid_index/1_introgress/1_RG_global_ancestry_informative_HI.txt", header=T)
+```
+
+
+##Plot these high PST loci based on longitude to see the geographic patterns
+
+#First RG
+```{r}
+model_results_long <- model_results %>%
+  pivot_longer(
+    cols = contains("_ADL_"),       # pick all methylation columns
+    names_to = "sample_id",         # old column names -> sample_id
+    values_to = "methylation"       # new column with methylation values
+  )
+
+model_results_long <- left_join(model_results_long, info, by = c("sample_id" = "id.wolf"))
+model_results_long <- left_join(model_results_long, local_anc, by = "sample_id")
+model_results_long <- left_join(model_results_long, near_SNP, by = c("sample_id" = "site_id"))
+```
+
+
+```{r}
+#set color palette
+pal <- c("#6294b7", #G
+         "#aa0a0f", #R
+         "#9716a8", #RG
+         "grey") #NA/unknown
+
+
+#Plotting:
+long.plot <- ggplot(data = model_results_long, aes(x = as.numeric(model_results_long$proportion_rustica_ancestry), y = model_results_long$methylation, color = model_results_long$`subspecies/zone`)) +
+  geom_point(size = 3) +
+  scale_color_manual(values = pal) +
+  ylim(0,1) +
+  theme_minimal() + 
+  labs(x = "Longitude", y = "Methylation Proportion", color = "Subspecies") +
+  theme(plot.title = element_text(size = 12, face = "bold", hjust = 0.5),
+        axis.title = element_text(size = 10),
+        axis.text = element_text(size = 8),
+        axis.line = element_line(color = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_y_continuous(breaks = seq(0, 1, by = 0.2)) +
+  facet_wrap(~site.id)
+       
+long.plot
+
+
+unique(model_results_long$site.id)
+```
+By nearest SNP
+
+```{r}
+
+#set color palette
+pal <- c("#6294b7", #G
+         "#aa0a0f", #R
+         "#9716a8", #RG
+         "grey") #NA/unknown
+
+#For genotyxpe plotting
+plot_data <- model_results_long %>% filter(site.id == "chr05_44763574") %>% mutate(snp_raw = as.factor(as.numeric(chr05_44763574.y)))
+
+#For population plotting
+plot_data <- model_results_long %>%
+  filter(site.id == "chr05_44763574") %>%
+  filter(!is.na(`subspecies/zone`)) %>%
+  #filter(!is.na(chr05_44763574)) %>%   # remove NAs in SNP column
+  mutate(
+    snp_raw = case_when(
+      `subspecies/zone` == "gutturalis"  ~ "GU",
+      `subspecies/zone` == "rustica" ~ "RUr",
+      `subspecies/zone` == "rustica-gutturalis" ~ as.character(as.numeric(chr05_44763574.y))
+    ),
+    snp_raw = factor(snp_raw)
+  )
+
+
+long.plot <- ggplot(plot_data, aes(x = snp_raw, 
+                                   y = methylation, 
+                                   fill = `subspecies/zone`)) +
+  geom_boxplot(alpha = 0.7, outlier.shape = NA) +
+  geom_jitter(position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.7),
+              size = 2, alpha = 0.6) +
+  scale_fill_manual(values = pal) +
+  ylim(0,1) +
+  theme_minimal() +
+  labs(x = "Local Ancestry Group", y = "Methylation Proportion", fill = "Subspecies") +
+  theme(plot.title = element_text(size = 12, face = "bold", hjust = 0.5),
+        axis.title = element_text(size = 10),
+        axis.text = element_text(size = 8),
+        axis.line = element_line(color = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_y_continuous(breaks = seq(0, 1, by = 0.2))
+
+
+long.plot
+
+
+```
+
+Now local ancestry
+
+```{r}
+
+#set color palette
+pal <- c("#6294b7", #G
+         "#aa0a0f", #R
+         "#9716a8", #RG
+         "grey") #NA/unknown
+
+plot_data <- model_results_long %>%
+  filter(site.id == "chr05_44763574") %>%
+  filter(!is.na(`subspecies/zone`)) %>%
+  mutate(
+    local_ancestry_raw = as.numeric(chr05_44763574.x),
+    # Create categorical variable directly
+    local_ancestry_group = case_when(
+      grepl("_G_", sample_id) ~ "GU",
+      grepl("_R_", sample_id) ~ "RUr",
+      TRUE ~ as.character(cut(
+        local_ancestry_raw,
+        breaks = c(-Inf, 0.25, 0.5, 0.75, Inf),
+        labels = c("0–0.25", "0.25–0.5", "0.5–0.75", "0.75–1"),
+        right = TRUE
+      ))
+    ),
+    # Order factor levels for nicer plotting
+    local_ancestry_group = factor(
+      local_ancestry_group,
+      levels = c("GU", "0–0.25", "0.25–0.5", "0.5–0.75", "0.75–1", "RUr")
+    )
+  )
+
+long.plot <- ggplot(plot_data, aes(x = local_ancestry_group, 
+                                   y = methylation, 
+                                   fill = `subspecies/zone`)) +
+  geom_boxplot(alpha = 0.7, outlier.shape = NA) +
+  geom_jitter(position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.7),
+              size = 2, alpha = 0.6) +
+  scale_fill_manual(values = pal) +
+  ylim(0,1) +
+  theme_minimal() +
+  labs(x = "Local Ancestry Group", y = "Methylation Proportion", fill = "Subspecies") +
+  theme(plot.title = element_text(size = 12, face = "bold", hjust = 0.5),
+        axis.title = element_text(size = 10),
+        axis.text = element_text(size = 8),
+        axis.line = element_line(color = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_y_continuous(breaks = seq(0, 1, by = 0.2))
+
+
+long.plot
+
+
+```
+
+```{r}
+
+#set color palette
+pal <- c("#6294b7", #G
+         "#aa0a0f", #R
+         "#9716a8", #RG
+         "grey") #NA/unknown
+
+plot_data <- model_results_long %>%
+  filter(site.id == "chr05_44763574") %>%
+  filter(!is.na(`subspecies/zone`)) %>%
+  mutate(
+    local_ancestry_raw = as.numeric(chr05_44763574.x),
+    # Create categorical variable directly
+    local_ancestry_group = case_when(
+      grepl("_G_", sample_id) ~ "GU",
+      grepl("_R_", sample_id) ~ "RUr",
+      TRUE ~ as.character(cut(
+        local_ancestry_raw,
+        breaks = c(-Inf, 0.25, 0.5, 0.75, Inf),
+        labels = c("0–0.25", "0.25–0.5", "0.5–0.75", "0.75–1"),
+        right = TRUE
+      ))
+    ),
+    # Order factor levels for nicer plotting
+    local_ancestry_group = factor(
+      local_ancestry_group,
+      levels = c("GU", "0–0.25", "0.25–0.5", "0.5–0.75", "0.75–1", "RUr")
+    )
+  )
+
+long.plot <- ggplot(plot_data, aes(x = local_ancestry_group, 
+                                   y = methylation, 
+                                   fill = `subspecies/zone`)) +
+  geom_boxplot(alpha = 0.7, outlier.shape = NA) +
+  geom_jitter(position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.7),
+              size = 2, alpha = 0.6) +
+  scale_fill_manual(values = pal) +
+  ylim(0,1) +
+  theme_minimal() +
+  labs(x = "Local Ancestry Group", y = "Methylation Proportion", fill = "Subspecies") +
+  theme(plot.title = element_text(size = 12, face = "bold", hjust = 0.5),
+        axis.title = element_text(size = 14),
+        axis.text = element_text(size = 12),
+        axis.line = element_line(color = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_y_continuous(breaks = seq(0, 1, by = 0.2))
+
+
+long.plot
+```
+
+save image
+```{r}
+ggsave("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/4_RGT_Hybrids/3_methylation_models/RG_hyb/RG_models/2_Figure3e_local_anc_plot.png", plot = long.plot, width = 6, height = 3)
+```
+
+
+Two vertical panels
+
+```{r}
+plot_data <- model_results_long %>%
+  filter(site.id == "chr05_44763574") %>%
+    filter(!is.na(`subspecies/zone`)) %>%
+  mutate(
+    local_ancestry_raw = as.numeric(chr05_44763574.x),
+
+    # Local ancestry grouping
+    local_ancestry_group = case_when(
+      grepl("_G_", sample_id) ~ "GU",
+      grepl("_R_", sample_id) ~ "RUr",
+      TRUE ~ as.character(cut(
+        local_ancestry_raw,
+        breaks = c(-Inf, 0.25, 0.5, 0.75, Inf),
+        labels = c("0–0.25", "0.25–0.5", "0.5–0.75", "0.75–1"),
+        right = TRUE
+      ))
+    ),
+
+    # Rustica ancestry grouping (with same G/R rule)
+    rustica_group = case_when(
+      grepl("_G_", sample_id) ~ "GU",
+      grepl("_R_", sample_id) ~ "RUr",
+      TRUE ~ as.character(cut(
+        as.numeric(proportion_rustica_ancestry),
+        breaks = c(-Inf, 0.25, 0.5, 0.75, Inf),
+        labels = c("0–0.25", "0.25–0.5", "0.5–0.75", "0.75–1"),
+        right = TRUE
+      ))
+    ),
+
+    # set consistent ordering
+    local_ancestry_group = factor(local_ancestry_group,
+      levels = c("GU", "0–0.25", "0.25–0.5", "0.5–0.75", "0.75–1", "RUr")
+    ),
+    rustica_group = factor(rustica_group,
+      levels = c("GU", "0–0.25", "0.25–0.5", "0.5–0.75", "0.75–1", "RUr")
+    )
+  ) %>%
+  tidyr::pivot_longer(
+    cols = c(local_ancestry_group, rustica_group),
+    names_to = "ancestry_type",
+    values_to = "ancestry_group"
+  )
+
+# Make plot
+long.plot <- ggplot(plot_data, aes(x = ancestry_group, 
+                                   y = methylation, 
+                                   fill = `subspecies/zone`)) +
+  geom_boxplot(alpha = 0.7, outlier.shape = NA) +
+  #geom_jitter(position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.7),
+  #            size = 2, alpha = 0.6) +
+  scale_fill_manual(values = pal) +
+  ylim(0,1) +
+  theme_minimal() +
+  labs(x = "Hybrid Index", y = "Methylation Proportion", fill = "Subspecies") +
+ facet_wrap(~ancestry_type, ncol = 1, scales = "free_x",
+             labeller = as_labeller(c(
+               local_ancestry_group = "Local",
+               rustica_group = "Genome-wide"
+             ))) +
+  theme(plot.title = element_text(size = 12, face = "bold", hjust = 0.5),
+        axis.title = element_text(size = 12),
+        axis.text = element_text(size = 12),
+        axis.line = element_line(color = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank(),
+        strip.text = element_text(size = 12, face = "bold"),
+        axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_y_continuous(breaks = seq(0, 1, by = 0.2))
+
+long.plot
+
+```
+save image
+```{r}
+ggsave("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/4_RGT_Hybrids/3_methylation_models/RG_hyb/RG_models/2_Figure3e_local_gw_plot.png", plot = long.plot, width = 6, height = 5)
+```
+
+

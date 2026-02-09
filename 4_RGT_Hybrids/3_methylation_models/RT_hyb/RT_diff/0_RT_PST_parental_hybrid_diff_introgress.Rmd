@@ -1,0 +1,533 @@
+---
+title: "PST.RGT.hybrids"
+author: "Sarah Mueller"
+date: "2025-06-16"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+### Libraries
+
+listOfPackages <- c("ggplot2","reshape2","here", "ggforce", "matrixStats","viridis","readr","vegan","factoextra","readxl", "tidyverse","dplyr", "plotly", "GGally","ggpubr","ggrepel", "data.table", "missMDA", "gghalves", "broom", "ggdist")
+
+for (i in listOfPackages){
+  if(! i %in% installed.packages()){
+    install.packages(i, dependencies = TRUE)
+  }
+  require(i,character.only=TRUE)
+}
+
+```
+
+## Load genome information.
+
+```{r}
+category <- read.delim("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_Pre-processing/4_methyl_calling/1_CpG_islands/168.20miss/homer.cpgi.prop.168.merged.20miss.rmlowv.rmout.txt", header=T)
+
+#separate chr and pos columns
+category <- category %>%
+  separate(loci.id, into = c("chr", "pos"), sep = "_", remove = FALSE) %>%
+  distinct(chr, pos, .keep_all = TRUE) %>%
+  mutate(pos = as.numeric(pos))
+
+#get rid of leading and trailing white spaces
+category$category <- trimws(category$category)
+
+#specify region
+category <- category %>%
+  mutate(region = sub("_.*", "", category))
+
+```
+
+## Load PST information for the parental population comparisons for the hybrid zone
+
+Looking at highest PST differences between RGT and looking at these sites in hybrids
+
+```{r, message=FALSE, warning=FALSE}
+pst_site <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/0_cpgi_pst/0_pst_cpgi_c05.txt", header=T)
+
+pst_RGT <- pst_site %>% dplyr::select(site.id, gutturalis.vs.rustica.r.pst, gutturalis.vs.tytleri.pst, rustica.r.vs.tytleri.pst)
+
+# Reshape the PST data into long form
+pst_RGT_long <- pst_RGT %>%
+  pivot_longer(-site.id, names_to = "comparison", values_to = "pst") %>%
+  drop_na() %>%
+  separate(comparison, into = c("pop1", "pop2"), sep = "\\.vs\\.") %>%
+  mutate(pop2 = gsub("\\.pst$", "", pop2))
+
+
+#Grab only top 1% of PST loci 
+pst_rt <- pst_RGT_long %>%
+  filter(pop1 == "rustica.r", pop2 == "tytleri") %>%
+  arrange(desc(pst)) %>%
+  mutate(rank = row_number()) %>%
+  filter(pst >= quantile(pst, 0.99, na.rm = TRUE)) 
+
+```
+
+## Load methylation data
+```{r}
+prop.hyb <- read.delim("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_Pre-processing/4_methyl_calling/1_CpG_islands/168.20miss/homer.cpgi.prop.168.merged.20miss.rmlowv.rmout.txt", header=T)
+
+pst_rt <- left_join(pst_rt, prop.hyb, by = c("site.id" = "region.id"))
+
+
+# Remove "ME_" from the start of any column name in pst_rg
+colnames(pst_rt) <- gsub("^ME_", "", colnames(pst_rt))
+
+
+```
+
+## Load introgress information as this will allow us to better define hybrids and parentals than just population assignment
+
+```{r}
+#Load in introgress results
+rt_admix <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/5_WGS/2_hybrid_index/2_newhybrids/RT_hyb/2_output_classes.txt", header=T)
+
+#Define based on classes from New Hybrids
+par.R <- rt_admix %>% filter(Assigned_Class == "R", grepl("_R_", Individual))
+par.T <- rt_admix %>% filter(Assigned_Class == "T", grepl("_T_", Individual))
+hyb.RT <- rt_admix %>% filter(Assigned_Class == "F1")
+
+```
+
+## Grab high PST loci for the RT comparison
+```{r}
+# Define population groups based on the id column of three dataframes
+population_groups <- list(
+  Rr = par.R$Individual,
+  T = par.T$Individual,
+  RT = hyb.RT$Individual
+)
+
+# Calculate the mean and variance for each population group
+population_stats <- sapply(names(population_groups), function(pop) {
+  # Get the IDs for the current population group
+  ids <- population_groups[[pop]]
+  
+  # Check if the IDs exist as columns in pst_rt
+  cols <- intersect(ids, colnames(pst_rt))
+  
+  if (length(cols) == 0) return(NULL) # If no columns match, return NULL
+  
+  # Compute row means and variances
+  means <- apply(pst_rt[, cols, drop = FALSE], 1, function(x) mean(x, na.rm = TRUE))
+  vars  <- apply(pst_rt[, cols, drop = FALSE], 1, function(x) var(x, na.rm = TRUE))
+  
+  # Return a matrix with mean and variance as separate columns
+  cbind(means, vars)
+}, simplify = FALSE)
+
+# Combine results into a single data.frame
+population_stats_df <- do.call(cbind, lapply(names(population_stats), function(pop) {
+  out <- population_stats[[pop]]
+  if (is.null(out)) return(NULL)
+  colnames(out) <- c(pop, paste0(pop, ".var"))
+  out
+}))
+
+pst_prop_rt <- cbind(pst_rt, population_stats_df)
+
+pst_prop_rt <- pst_prop_rt %>% filter(!if_all(contains("_ADL_"), is.na))
+#ONLY 1084 sites present in hybrids also with missing data below 20%
+
+pst_prop_rt <- pst_prop_rt %>%
+  dplyr::select(!contains("DE_") & !contains("CH_") & !contains("FI_") & !contains("_G_") & !contains("_RG_"))
+
+```
+
+## Test for differences between the parental and hybrid means
+
+I want to test if the parents and hybrids differ significantly from eachother. 
+
+```{r}
+R_names <- par.R$Individual
+T_names <- par.T$Individual
+RT_names <- hyb.RT$Individual
+
+# Map individual names to their population assignments
+# We create a dataframe that maps each individual column name to its population.
+individual_to_pop <- tibble(
+  individual = c(R_names, T_names, RT_names),
+  population = c(
+    rep("R", length(R_names)),
+    rep("T", length(T_names)),
+    rep("RT", length(RT_names))
+  )
+)
+```
+
+## Reshape the data for ANOVA
+I need to transform the data from a wide format (one column per individual) to a long format (one column for measurements, one for population).
+I'll only select columns that represent individuals. These are columns containing "_ADL_" in their names.
+
+```{r}
+pheno_cols <- names(pst_prop_rt)[grepl("_ADL_", names(pst_prop_rt))]
+##needed if testing subests
+final_cols <- pheno_cols[pheno_cols %in% individual_to_pop$individual]
+
+long_data <- pst_prop_rt %>%
+  dplyr::select(site.id, all_of(final_cols)) %>%
+  pivot_longer(
+    cols = -site.id,
+    names_to = "individual",
+    values_to = "phenotype_value"
+  ) %>%
+  # Now, join the phenotypic data with the population data.
+  left_join(individual_to_pop, by = "individual") %>%
+  # We need to make sure 'population' is a factor for statistical testing.
+  mutate(population = as.factor(population))
+
+long_data$population[is.na(long_data$population)] <- "RT"
+```
+
+## Perform the ANOVA and Tukey HSD test for each site
+Use the nest approach to run the ANOVA and possible Tukey test to each site.
+
+```{r}
+# Group the long data by site.id
+nested_data <- long_data %>%
+  group_by(site.id) %>%
+  nest()
+
+# Create a function to perform the analysis
+run_anova_and_tukey <- function(df) {
+  # Perform one-way ANOVA
+  anova_model <- aov(phenotype_value ~ population, data = df)
+
+  # Use broom::tidy to get a clean dataframe of all ANOVA results
+  anova_results <- tidy(anova_model)
+
+  # Only run Tukey's test if the ANOVA is significant (e.g., p < 0.05).
+  # This is a standard practice to avoid false positives.
+  anova_p_value <- anova_results$p.value[1]
+
+  if (anova_p_value < 0.05) {
+    # Perform Tukey-Kramer HSD post-hoc test
+    tukey_test <- TukeyHSD(anova_model)
+    
+    #Convert to dataframe
+    tukey_df <- as.data.frame(tukey_test$population) %>%
+    tibble::rownames_to_column(var = "comparison") %>%
+    dplyr::rename(p_value_adjusted = `p adj`)
+    
+    # Store the results and return them
+    return(list(
+      anova_results = anova_results,
+      tukey_results = tukey_df # 'tidy' makes it a clean dataframe
+    ))
+  } else {
+    # If ANOVA is not significant, return a message for the Tukey results
+    return(list(
+      anova_results = anova_results,
+      tukey_results = "Not significant"
+    ))
+  }
+}
+
+# Apply the function to each nested dataframe (each site)
+results <- nested_data %>%
+  mutate(analysis = map(data, run_anova_and_tukey)) %>%
+  # Remove the 'data' column to keep the output clean
+  dplyr::select(site.id, analysis)
+```
+
+## Clean results
+
+```{r}
+#Unnest to retrieve summary
+final_anova_results <- results %>%
+  mutate(anova_summary = map(analysis, "anova_results")) %>%
+  dplyr::select(site.id, anova_summary) %>%
+  unnest(cols = anova_summary) %>%
+  # Filter to show only the row with the population statistics
+  filter(term == "population") %>%
+  # Rename columns for clarity using dplyr::rename as requested by the user.
+  dplyr::rename(
+    df = df,
+    sum_sq = sumsq,
+    mean_sq = meansq,
+    f_statistic = statistic,
+    p_value = p.value
+  ) %>%
+  dplyr::select(site.id, df, f_statistic, p_value)
+
+#See how many sites/regions are significant
+site_summary <- final_anova_results %>%
+  mutate(location_type = if_else(
+    str_count(site.id, "_") == 2, 
+    "region", 
+    "site"
+  ))
+
+# 2. Summary to see the counts of each
+site_summary %>%
+  filter(p_value < 0.05) %>%
+  group_by(location_type) %>%
+  summarise(count = n())
+
+
+#Extract the Tukey results 
+
+#Filter to keep only rows where the Tukey results are significant
+significant_tukey <- results %>%
+  filter(map_lgl(analysis, ~ is.data.frame(.$tukey_results)))
+
+#Extract dataframe
+final_tukey_list <- set_names(
+  map(significant_tukey$analysis, "tukey_results"),
+  significant_tukey$site.id
+)
+```
+
+##Clean Tukey Results
+
+I want to make the Tukey results more readable, so I convert them into a dataframe instead of a list
+
+```{r}
+#This function takes the Tukey data frame for a single site and reshapes it.
+process_tukey_df <- function(df) {
+  # Add the 'comparison' column to the row names
+  df_wide <- df %>%
+    tibble::column_to_rownames("comparison")
+
+  # Reshape the data frame from long to wide format
+  # The 'comparison' row names become the prefixes for the new columns
+  df_wide <- as.data.frame(t(df_wide))
+  df_wide <- tibble::rownames_to_column(df_wide, var = "metric")
+
+  # Pivot the data frame to have the comparisons as part of the column names
+  df_wide <- df_wide %>%
+    pivot_wider(names_from = metric, values_from = everything())
+
+  # Clean up column names to match the requested format (e.g., R_G_diff)
+  # The 'names_prefix' argument from pivot_wider handles this automatically.
+  
+  return(df_wide)
+}
+
+# Apply the function to each data frame in the list
+wide_tukey_list <- map(final_tukey_list, process_tukey_df)
+
+```
+
+Look at which sites are dominant for one parental, transgressive, or co-dominant. For this we will also need the men values of the populations
+```{r}
+# Combine the individual data frames into one large data frame
+final_tukey <- bind_rows(wide_tukey_list, .id = "site.id")
+final_tukey <- final_tukey %>% dplyr::select(-matches("^metric"))
+final_tukey <- left_join(final_tukey, pst_prop_rt, by="site.id")
+
+final_tukey <- final_tukey %>%
+  mutate(
+    type = case_when(
+      # R.dominant if R-G and RG-G are significant, but RG-R is not.
+      # Note: We are using the 'p_value_adjusted' column for significance.
+      `T-R_p_value_adjusted` < 0.05 & `T-RT_p_value_adjusted` < 0.05 & `RT-R_p_value_adjusted` > 0.05 ~ "rustica dominant",
+
+      # G.dominant if R-G and RG-R are significant, but RG-G is not.
+      `T-R_p_value_adjusted` < 0.05 & `RT-R_p_value_adjusted` < 0.05 & `T-RT_p_value_adjusted` > 0.05 ~ "tytleri dominant",
+
+      # Transgressive if RG-R and RG-G are significant and RG is outside the R-G range.
+      `RT-R_p_value_adjusted` < 0.05 & `T-RT_p_value_adjusted` < 0.05 & (RT > max(Rr, T) | RT < min(Rr, T)) ~ "transgressive",
+
+      # Intermediate if RG-R and RG-G are significant and RG is between R and G.
+      `RT-R_p_value_adjusted` < 0.05 & `T-RT_p_value_adjusted` < 0.05 & (RT > min(Rr, T) & RT < max(Rr, T)) ~ "co-dominant",
+
+      # All other cases
+      TRUE ~ "other"
+    )
+  )
+
+final_results_table <- final_tukey[,-c(18:84)]
+final_results_table <- final_results_table[,-c(23:27)]
+```
+
+Save results
+```{r}
+write.table(final_results_table, "/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/4_RGT_Hybrids/3_methylation_models/RT_hyb/RT_diff/0_RT_parental_hybrid_tukey_results.txt", sep= "\t", quote = FALSE, row.names = FALSE)
+
+final_results <- read.delim("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/4_RGT_Hybrids/3_methylation_models/RT_hyb/RT_diff/0_RT_parental_hybrid_tukey_results.txt")
+```
+
+Run Fisher's exact test to detemine if it depends on being in an island, flank or site
+```{r}
+# 1. Add a column for site type
+final_results_fischer <- final_anova_results %>%
+  mutate(
+    loci.region = if_else(stringr::str_count(site.id, "_") == 2, "region", "site"),
+    significant = if_else(p_value > 0.05, "nonsig", "sig")
+  )
+
+# 2. Count significant vs nonsignificant by type
+table_sig <- table(final_results_fischer$loci.region, final_results_fischer$significant)
+table_sig
+
+fisher.test(table_sig)
+
+prop.table(table_sig, margin = 1)
+
+summary(as.factor(final_tukey$type))
+
+```
+
+Now I would like to plot all 791 significantly different loci in PST outliers in a boxplot, and separate them into the groups identified from the ANOVA and Tukey Test.
+
+```{r}
+#Plot all loci
+final_results <- left_join(pst_rt, final_results_table, by = "site.id")
+final_results <- final_results %>%
+  mutate(type = replace_na(type, "not significant"))
+final_results <- final_results %>%
+  dplyr::select(!contains("DE_") & !contains("CH_") & !contains("FI_") & !contains("_G_") & !contains("_RG_"))
+
+#Identify the ADL columns that are NOT in your reference list
+adl_cols <- names(final_results)[grepl("_ADL_", names(final_results))]
+invalid_adl_cols <- adl_cols[!(adl_cols %in% individual_to_pop$individual)]
+final_results <- final_results %>% dplyr::select(
+    !all_of(invalid_adl_cols)
+  )
+
+#Reshape
+final_results_long <- final_results %>%
+  pivot_longer(
+    cols = contains("_ADL_"),  # Select all columns representing individuals
+    names_to = "individual",             # Create a new 'id' column from the column names
+    values_to = "methylation" # Create a new  column  for methylation data
+  )
+
+
+final_results_long <- final_results_long %>%
+  mutate(type = replace_na(type, "not significant")) %>%
+  # Join with individuals_to_pop to get the population for each individual
+  left_join(individual_to_pop, by = "individual")%>%
+  # Reorder the population factor levels to control the order of boxplots
+  mutate(population = factor(population, levels = c("R", "RT", "T")))
+
+final_results_long$type <- factor(final_results_long$type, levels = c("rustica dominant", "tytleri dominant", "co-dominant", "other", "not significant"))
+
+##I remove not significant for now because its too much to plot
+final_results_long <- final_results_long %>% filter(!type== "not significant")
+
+final_results_long <- final_results_long %>%
+  mutate(population = case_when(
+    population == "R"  ~ "RUr",
+    population == "T"  ~ "TY",
+    population == "RT" ~ "hybrids",
+    TRUE ~ population),
+     population = factor(population, levels = c("RUr", "hybrids", "TY")))
+
+final_results_plot <- final_results_long %>%
+  # Keep a max of 100 entries per type because it too many sites for supplements
+  group_by(type) %>%
+  slice_head(n = 1450) %>% #50 loci per group
+  ungroup()
+
+```
+
+Plot
+  
+```{r}
+pal <- c("#aa0a0f", #R
+         "#FFA500", #RT
+         "#f4d000", #T
+         "grey") #NA/unknown
+names(pal) <- c("RUr", "hybrids", "TY")
+
+phenotype_plot <- final_results_plot %>%
+  ggplot(aes(x = site.id, y = methylation)) +
+  geom_boxplot(aes(fill = population), outlier.size = 0.5) + # fill by population to distinguish
+  # Use facet_wrap to create separate plots for each 'type'
+  # The 'scales = "free_y"' combined with 'coord_flip()' ensures that
+  # only the site.ids relevant to each facet are shown.
+  facet_wrap(~ type, scales = "free_y", ncol = 2) + # Changed ncol to 2
+  # Flip the coordinates for better horizontal space for site.id labels
+  coord_flip() +
+  # Add labels and a title for clarity.
+  labs(
+    title = "Methylation Proportion of Significant CpG sites",
+    x = "Site ID",
+    y = "Methylation Proportion",
+    fill = "Population"
+  ) +
+  # Use a minimal theme and remove the plot background for a cleaner look.
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    # Remove the grey background and gridlines
+    panel.background = element_blank(),
+    panel.grid = element_blank(),
+    strip.text = element_text(size = 12, face = "bold")
+  ) +
+  # Add the custom color palette to the plot
+  scale_fill_manual(values = pal)
+
+print(phenotype_plot)
+
+```
+
+save image
+
+```{r}
+
+ggsave("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/4_RGT_Hybrids/3_methylation_models/RT_hyb/RT_diff/0_RT_parental_hybrid_tukey_boxplots.png", plot = phenotype_plot, width = 12, height = 18)
+```
+
+Pull out one from each type to use as a subset in Figure 3.
+R.dom chr26_4024119
+T.dom chr07_36518714
+Inter chr08_9797539
+
+```{r}
+
+final_results_long <- final_results_long %>% filter(site.id %in% c("chr26_4024119", "chr07_36518714", "chr08_9797539"))
+
+
+pal <- c("#aa0a0f", #R
+         "#FFA500", #RT
+         "#f4d000", #T
+         "grey") #NA/unknown
+names(pal) <- c("RUr", "hybrids", "TY")
+
+sub_plot <- final_results_long %>%
+  ggplot(aes(x = site.id, y = methylation)) +
+  geom_boxplot(aes(fill = population), outlier.size = 0.5) + # fill by population to distinguish
+  # Use facet_wrap to create separate plots for each 'type'
+  # The 'scales = "free_y"' combined with 'coord_flip()' ensures that
+  # only the site.ids relevant to each facet are shown.
+  facet_wrap(~ type, scales = "free_y", ncol = 1) + # Changed ncol to 2
+  # Flip the coordinates for better horizontal space for site.id labels
+  coord_flip() +
+  # Add labels and a title for clarity.
+  labs(
+    title = "Methylation Proportion of Significant CpG sites",
+    x = "Site ID",
+    y = "Methylation Proportion",
+    fill = "Population"
+  ) +
+  # Use a minimal theme and remove the plot background for a cleaner look.
+  theme_minimal() +
+  theme(
+    plot.title = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1, size=10),
+    axis.text.y = element_text(size=10),
+    axis.line.x = element_line(),
+    axis.line.y = element_line(),
+    panel.background = element_blank(),
+    panel.grid = element_blank(),
+    axis.title.y = element_blank(),
+    strip.text = element_text(size = 10, face = "bold")
+  ) +
+  # Add the custom color palette to the plot
+  scale_fill_manual(values = pal)
+
+print(sub_plot)
+```
+save image 
+```{r}
+ggsave("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/4_RGT_Hybrids/3_methylation_models/RT_hyb/RT_diff/0_Figure3d_RT_boxplots.png", plot = sub_plot, width = 6, height = 3, units = "in", dpi = 500)
+```
+

@@ -1,0 +1,567 @@
+---
+title: "PST.RGT.hybrids"
+author: "Sarah Mueller"
+date: "2025-06-16"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+### Libraries
+
+listOfPackages <- c("ggplot2","reshape2","here", "ggforce", "matrixStats","viridis","readr","vegan","factoextra","readxl", "tidyverse","dplyr", "plotly", "GGally","ggVennDiagram","ggrepel", "data.table", "ComplexHeatmap","missMDA")
+
+for (i in listOfPackages){
+  if(! i %in% installed.packages()){
+    install.packages(i, dependencies = TRUE)
+  }
+  require(i,character.only=TRUE)
+}
+
+```
+
+## Load genome information.
+
+```{r}
+category <- read.delim("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_Pre-processing/4_methyl_calling/1_CpG_islands/168.20miss/homer.cpgi.prop.168.merged.20miss.rmlowv.rmout.txt", header=T)
+
+#separate chr and pos columns
+category <- category %>%
+  separate(loci.id, into = c("chr", "pos"), sep = "_", remove = FALSE) %>%
+  distinct(chr, pos, .keep_all = TRUE) %>%
+  mutate(pos = as.numeric(pos))
+
+#get rid of leading and trailing white spaces
+category$category <- trimws(category$category)
+
+#specify region
+category <- category %>%
+  mutate(region = sub("_.*", "", category))
+
+```
+
+## Load methylation and PST information and look for only the highest Pst sites
+
+```{r, message=FALSE, warning=FALSE}
+pst_site <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST/0_cpgi_pst/0_pst_cpgi_c05.txt", header=T)
+
+pst_RGT <- pst_site %>% select(site.id, gutturalis.vs.rustica.r.pst, gutturalis.vs.tytleri.pst, rustica.r.vs.tytleri.pst)
+
+# Reshape the PST data into long form
+pst_RGT_long <- pst_RGT %>%
+  pivot_longer(-site.id, names_to = "comparison", values_to = "pst") %>%
+  drop_na() %>%
+  separate(comparison, into = c("pop1", "pop2"), sep = "\\.vs\\.") %>%
+  mutate(pop2 = gsub("\\.pst$", "", pop2))
+
+top_1_pct_pst <- pst_RGT_long %>%
+  group_by(pop1,pop2) %>%
+  arrange(desc(pst)) %>%
+  mutate(rank = row_number()) %>%
+  group_by(pop1,pop2) %>%
+  filter(pst >= quantile(pst, 0.99, na.rm = TRUE)) %>%
+  ungroup() %>%
+  select(-rank) # Remove rank column if not needed
+```
+
+#Look to see if top 1% PST differs between RG and RT parentals
+
+```{r}
+# Plot the distribution of the top1% of PST between RG and RT comparisons
+# Filter the data for the two specific comparisons
+# and create a grouping variable for the colors
+plot_data <- top_1_pct_pst %>%
+  filter(
+    (pop1 == "gutturalis" & pop2 == "rustica.r") | 
+    (pop1 == "rustica.r" & pop2 == "tytleri")
+  ) %>%
+  mutate(comparison = case_when(
+    pop1 == "gutturalis" & pop2 == "rustica.r" ~ "Gutturalis vs Rustica",
+    pop1 == "rustica.r" & pop2 == "tytleri" ~ "Rustica vs Tytleri"
+  ))
+
+# 2. Create the histogram
+ggplot(plot_data, aes(x = pst, fill = comparison)) +
+  geom_density(alpha = 0.5) + # alpha adds transparency so overlaps are visible
+  scale_fill_manual(values = c(
+    "Gutturalis vs Rustica" = "purple", 
+    "Rustica vs Tytleri" = "orange"
+  )) +
+  theme_minimal() +
+  labs(
+    title = "Density Distribution of Top 1% Pst Values",
+    x = "Pst Value",
+    y = "Density",
+    fill = "Population Comparison"
+  )
+
+
+# Extract the Pst values for each group
+gutt_rustica <- top_1_pct_pst %>%
+  filter(pop1 == "gutturalis", pop2 == "rustica.r") %>%
+  pull(pst)
+
+summary(gutt_rustica)
+
+rust_tytleri <- top_1_pct_pst %>%
+  filter(pop1 == "rustica.r", pop2 == "tytleri") %>%
+  pull(pst)
+
+summary(rust_tytleri)
+
+#Check for normality
+shapiro.test(gutt_rustica)
+shapiro.test(rust_tytleri)
+
+#Use non-parametric
+wilcox_test_result <- wilcox.test(gutt_rustica, rust_tytleri)
+print(wilcox_test_result)
+```
+
+## Differences in methylation in parental populations
+Looking at highest PST differences between RGT and looking at these sites in hybrids
+
+In this case I am still looking at the top 1% of outlier PST loci between the 3 parental populations, the same threshold that was used for the PST/FST testing. We do not have hybrids from the G-T hybrid zone, but I thought it is still interesting to look at parental population comparisons. Generally intergenic and intron regions are represented in these outlier PST loci. 
+
+```{r}
+top_1_pct_pst <- top_1_pct_pst %>%
+  separate(site.id, into = c("chr", "pos"), remove=FALSE) %>%
+  mutate(pos = as.numeric(pos))
+
+top_1_pst_rgt_cat <- top_1_pct_pst %>%
+  left_join(category, by = c("site.id" = "region.id"))
+
+top_1_pst_rgt_cat %>%
+  group_by(pop1, pop2, Annotation) %>%
+  summarise(count = n()) %>%
+  ungroup() %>%
+  ggplot(aes(x = "", y = count, fill = Annotation)) +
+  geom_bar(stat = "identity", width = 1, color = "white") + 
+  coord_polar(theta = "y") + # Convert the bar chart into a pie chart
+  facet_wrap(~ pop1 + pop2, scales = "free", ncol = 2) +  # Facet by pop1 and pop2 combinations
+  theme_void() +  # Removes axes and gridlines
+  theme(legend.position = "right") +
+  labs(title = "Category Distribution by Pop1 and Pop2") # Add a title
+
+
+# Step 1: Create a contingency table of counts by pop1, pop2, and category
+category_counts <- top_1_pst_rgt_cat %>%
+  group_by(pop1, pop2, category) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  spread(key = category, value = count, fill = 0)  # Converts categories into separate columns for easy analysis
+
+
+# Step 1: Create a contingency table of counts by pop1, pop2, and category
+region_counts <- top_1_pst_rgt_cat %>%
+  group_by(pop1, pop2, region) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  spread(key = region, value = count, fill = 0)  # Converts categories into separate columns for easy analysis
+
+# Step 2: Perform Chi-Square Test and view contingency table
+chi_square_results <- region_counts %>%
+  group_by(pop1, pop2) %>%
+  do({
+    # Subset the data for the current pop1-pop2 group
+    contingency_table <- .[ , c("opensea", setdiff(names(.), c("pop1", "pop2", "opensea")))]
+    
+    # Perform the chi-square test
+    chi_test <- chisq.test(contingency_table)
+    
+    # Store the results
+    tibble(pop1 = unique(.$pop1),
+           pop2 = unique(.$pop2),
+           chi_squared = chi_test$statistic,
+           p_value = chi_test$p.value)
+  }) %>%
+  ungroup()
+```
+
+## Overlapping high PST windows between parental pairs of populations
+
+Do  outlier PST loci tend to overlap? If yes, it could be a sign of selection on specific advantegous sites. If not, it may indicate drift. Here there are no sites which overlap between all three parental population commparisons. However, the lack of this could also indicate that there are different selective pressures.
+
+```{r, message=FALSE, warning=FALSE}
+# Identify unique genomic regions (chr + window_end) per list_id
+overlap_sets <- top_1_pst_rgt_cat %>%
+  group_by(pop1, pop2) %>%
+  summarise(regions = list(site.id)) %>%
+  pull(regions) %>%
+  setNames(paste(top_1_pst_rgt_cat$pop1, top_1_pst_rgt_cat$pop2) %>% unique())
+
+# Plot Venn diagram
+ggVennDiagram(overlap_sets) +
+  scale_fill_gradient(low = "white", high = "blue") +
+  theme_minimal()
+
+
+##CHeck these overlapping sites
+overlap_df <- tibble(
+  site.id = unique(unlist(overlap_sets))
+) %>%
+  mutate(
+    in_pop1_pop2 = site.id %in% overlap_sets[[1]],
+    in_pop1_pop3 = site.id %in% overlap_sets[[2]],
+    in_pop2_pop3 = site.id %in% overlap_sets[[3]],
+    n_comparisons = in_pop1_pop2 + in_pop1_pop3 + in_pop2_pop3
+  )
+
+filter(overlap_df, n_comparisons == 3)  # shared by all
+overlap_2 <- filter(overlap_df, n_comparisons == 2)  # shared by exactly two
+filter(overlap_df, n_comparisons == 1)  # unique
+
+overlap_2 <- left_join(overlap_2, top_1_pct_pst, by = "site.id")
+```
+
+High PST islands/shores and sites are mainly unique to each population comparison, which is not the case for FST windows.
+
+## Heatmaps between populations of highest PST loci
+
+First, I plot all three parental populations together, just to get an overview. After, I plot only RG comparisons in the top 1% of PST loci.
+```{r}
+prop.RGT <- read.delim("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_Pre-processing/4_methyl_calling/1_CpG_islands/168.20miss/homer.cpgi.prop.168.merged.20miss.rmlowv.rmout.txt", header=T)
+
+prop.df <- prop.RGT %>%
+  dplyr::select(contains("RU_13_R_") | contains("_G_") | contains("_T_") | contains("region.id"))
+
+top_1_pst_rgt_site <- top_1_pst_rgt_cat %>%
+  dplyr::select("site.id")
+
+pst_prop <- top_1_pst_rgt_site %>% 
+  left_join(prop.df, by = c("site.id" = "region.id"))
+
+numeric_data <- pst_prop %>%
+  select(-site.id)
+
+# Convert the dataframe to a matrix
+numeric_matrix <- as.matrix(numeric_data)
+
+#Optional: set row names as site.id for better readability on the heatmap
+#rownames(numeric_matrix) <- pst_prop$site.id
+
+## Plotting for heatmap
+ha <- HeatmapAnnotation(summary = anno_summary(gp = gpar(fill = 2), 
+                                               height = unit(2, "cm")))
+h1 <- Heatmap(numeric_matrix, cluster_rows = T, 
+            column_labels = colnames(numeric_matrix), name="Methylation at PST outliers",
+            cluster_columns = F)
+
+h1
+
+```
+## rustica-gutturalis tests
+
+I want to now plot only rustica-gutturalis PST outliers and look at methylation values at these loci, and if they differ acroos the mean of each population. (Scripts to run significance tests are separate). This is to create a visual heatmap of all PST outliers and the methylation values in rustica and gutturalis separately. 
+```{r}
+# --- Data Preparation ---
+pst_rg <- top_1_pst_rgt_cat %>%
+  filter(pop1 == "gutturalis", pop2 == "rustica.r")
+
+prop.df <- prop.RGT %>%
+  dplyr::select(contains("RU_13_R_") | contains("_G_") | contains("region"))
+
+population_groups <- list(Rr = "RU_13_R_", G = "_G_")
+
+population_means <- sapply(names(population_groups), function(pop) {
+  cols <- grep(population_groups[[pop]], colnames(prop.df), value = TRUE)
+  if (length(cols) == 0) return(NULL)
+  apply(prop.df[, cols, drop = FALSE], 1, function(x) mean(x, na.rm = TRUE))
+})
+
+prop.rg <- cbind(prop.df, population_means) %>%
+  dplyr::select(region.id, Rr, G)
+
+pst_prop <- pst_rg %>%
+  left_join(prop.rg, by = c("site.id" = "region.id"))
+
+# This is now the primary data for the heatmap
+numeric_matrix <- pst_prop %>%
+  dplyr::select(matches("RU.*_R_"), matches("CN.*_G_"), G, Rr) %>%
+  dplyr::rename_with(~ str_remove(., "ME_")) %>%
+  as.matrix()
+
+# Set row names for the matrix
+rownames(numeric_matrix) <- pst_prop$site.id
+
+# --- Ordering and Splitting for Heatmap ---
+
+# Perform hierarchical clustering on rows (methylation loci)
+set.seed(123) # For reproducibility
+row_hclust <- hclust(dist(numeric_matrix))
+row_order <- row_hclust$order
+
+# Reorder the numeric_matrix based on clustering
+numeric_matrix <- numeric_matrix[row_order, ]
+
+# Define row splits based on clustering
+num_splits <- 2 # Adjust as needed for the desired number of blocks
+cluster_assignments_ordered <- cutree(row_hclust, k = num_splits)[row_order]
+final_row_split <- as.character(cluster_assignments_ordered)
+
+# Define column splits
+last_two_columns <- c(rep("Individuals", ncol(numeric_matrix) - 2), rep("Population Average", 2))
+
+# Define heatmap colors
+heatmap_colors <- colorRampPalette(c("#E0F2F7", "#A5D8FF", "#66B2FF", "#007ACC", "#004080", "#2E0854"))(100)
+
+# --- Create Heatmap ---
+rg1 <- Heatmap(numeric_matrix,
+               cluster_rows = TRUE,
+               show_row_dend = TRUE,
+               col = heatmap_colors,
+               name = "mCG/CG %",
+               cluster_columns = FALSE,
+               row_split = final_row_split,
+               column_split = last_two_columns,
+               show_row_names = FALSE,
+               show_column_names = TRUE,
+               column_names_rot = 45,
+               row_title_rot = 90,
+               row_title_gp = gpar(fontsize = 10, fontface = "bold"),
+               row_gap = unit(2, "mm"),
+               column_gap = unit(2, "mm"),
+               heatmap_legend_param = list(
+                 title = "mCG/CG %",
+                 at = c(0, 0.5, 1),
+                 labels = c("0%", "50%", "100%")
+               )
+)
+
+# Draw the heatmap
+draw(rg1, heatmap_legend_side = "bottom")
+```
+
+## Plot using only population means
+
+Visually it is still too much information using all the individuals, so I will now only use population means for each CpG island/flank/site.
+
+```{r}
+# --- Data Preparation ---
+pst_rg <- top_1_pst_rgt_cat %>%
+  filter(pop1 == "gutturalis", pop2 == "rustica.r")
+
+prop.df <- prop.RGT %>%
+  dplyr::select(contains("RU_13_R_") | contains("_G_") | contains("region.id"))
+
+population_groups <- list(Rr = "RU_13_R_", G = "_G_")
+
+population_means <- sapply(names(population_groups), function(pop) {
+  cols <- grep(population_groups[[pop]], colnames(prop.df), value = TRUE)
+  if (length(cols) == 0) return(NULL)
+  apply(prop.df[, cols, drop = FALSE], 1, function(x) mean(x, na.rm = TRUE))
+})
+
+prop.rg <- cbind(prop.df, population_means) %>%
+  dplyr::select(region.id, Rr, G)
+
+pst_prop <- pst_rg %>%
+  left_join(prop.rg, by = c("site.id" = "region.id"))
+
+pst_prop_islands <- pst_prop %>%
+  filter(!region == "opensea")
+
+pst_prop_open <- pst_prop %>%
+  filter(region == "opensea")
+
+# Filter numeric_matrix to only include population averages (G and Rr)
+numeric_matrix_original <- pst_prop_islands %>%
+  dplyr::select(G, Rr) %>% # Original order
+  as.matrix()
+
+# Reorder columns for horizontal flip if desired (Rr then G)
+numeric_matrix_original <- numeric_matrix_original[, c("Rr", "G")]
+
+# Set row names for the original matrix
+rownames(numeric_matrix_original) <- pst_prop$region.id
+
+# Now, rows will be 'Rr', 'G' and columns will be the methylation regions
+numeric_matrix_transposed <- t(numeric_matrix_original)
+
+# --- Adjusting Ordering and Splitting for the Transposed Heatmap ---
+
+# Clustering will now be on columns (methylation regions)
+# row_hclust will become col_hclust, and row_order will become col_order
+set.seed(123) # For reproducibility
+col_hclust <- hclust(dist(t(numeric_matrix_transposed))) # Cluster the original rows (now columns)
+col_order <- col_hclust$order
+
+# The 'rows' of the transposed matrix are now G and Rr. No need to reorder them based on clustering.
+# The 'columns' of the transposed matrix (original rows) will be ordered by col_order.
+# So, reorder numeric_matrix_transposed by columns:
+numeric_matrix_final <- numeric_matrix_transposed[, col_order]
+
+# The 'column_split' now refers to the original methylation regions.
+# This logic needs to move from 'row_split' to 'column_split'.
+# We need to apply cutree to the original row_hclust, and then map it to the transposed columns.
+num_splits <- 2 # Adjust as needed for the desired number of blocks
+# Get cluster assignments for the original methylation regions based on col_hclust
+cluster_assignments_ordered <- cutree(col_hclust, k = num_splits)[col_order]
+final_column_split <- as.character(cluster_assignments_ordered)
+
+
+# The 'row_split' will now refer to the original column names (Rr, G).
+# Still want a gap between Rr and G (which are now rows).
+# Define the new row split for the two rows (Rr, G)
+row_split_labels <- c("H. r. rustica", "H. r. gutturalis")
+names(row_split_labels) <- rownames(numeric_matrix_final) # Map to the actual row names: "Rr", "G"
+
+# Define heatmap colors
+heatmap_colors <- colorRampPalette(c("#E0F2F7", "#A5D8FF", "#66B2FF", "#007ACC", "#004080", "#2E0854"))(100)
+
+# --- Create Heatmap (Arguments swapped for transposed matrix) ---
+rg1 <- Heatmap(numeric_matrix_final, # Use the transposed matrix
+               cluster_rows = FALSE, # We don't want to cluster the populations (Rr, G)
+               cluster_columns = TRUE, # We now cluster the methylation regions (original rows)
+               show_row_dend = FALSE, # No dendrogram for populations
+               show_column_dend = TRUE, # Show dendrogram for methylation regions (now columns)
+               col = heatmap_colors,
+               name = "mCG/CG %",
+               # column_labels are now the methylation region IDs, which you hide.
+               # row_labels are now "Rr" and "G", which you probably want to see.
+               row_split = row_split_labels, # Split populations (now rows)
+               column_split = final_column_split, # Split methylation regions (now columns)
+               show_row_names = FALSE, # Show "Rr" and "G" labels
+               show_column_names = FALSE, # Hide methylation region IDs
+               row_names_rot = 0, # Keep "Rr" and "G" horizontal
+               column_names_rot = 90, # Rotate methylation region IDs if shown (but they are hidden)
+               row_title_gp = gpar(fontsize = 10, fontface = "italic"), # New: column titles become row titles
+               column_title_rot = 0, # New: row titles become column titles
+               column_title_gp = gpar(fontsize = 10, fontface = "bold"),
+               row_gap = unit(5, "mm"), # Gap between populations (now rows)
+               column_gap = unit(2, "mm"), # Gap between methylation region splits (now columns)
+               heatmap_legend_param = list(
+                 title = "mCG/CG %",
+                 at = c(0, 0.5, 1),
+                 labels = c("0%", "50%", "100%"),
+                 direction = "horizontal",
+                 title_position = "topcenter",
+                 labels_rot = 0,
+                 legend_width = unit(5, "cm")
+               )
+)
+
+# Draw the heatmap
+draw(rg1, heatmap_legend_side = "bottom")
+
+```
+
+## Plot island, flank and opensea
+
+Visually I want to separate islands/flanks/opensea so that it is clear the relative number of PST outliers from each category.
+
+```{r}
+# --- Data Preparation ---
+pst_rg <- top_1_pst_rgt_cat %>%
+  filter(pop1 == "gutturalis", pop2 == "rustica.r")
+
+prop.df <- prop.RGT %>%
+  dplyr::select(contains("RU_13_R_") | contains("_G_") | contains("region.id"))
+
+population_groups <- list(Rr = "RU_13_R_", G = "_G_")
+
+population_means <- sapply(names(population_groups), function(pop) {
+  cols <- grep(population_groups[[pop]], colnames(prop.df), value = TRUE)
+  if (length(cols) == 0) return(NULL)
+  apply(prop.df[, cols, drop = FALSE], 1, function(x) mean(x, na.rm = TRUE))
+})
+
+prop.rg <- cbind(prop.df, population_means) %>%
+  dplyr::select(region.id, Rr, G)
+
+# Initial data preparation
+pst_prop <- pst_rg %>%
+  left_join(prop.rg, by = c("site.id" = "region.id")) # Ensure 'region' column is in pst_prop after this join
+
+# Filter numeric_matrix to only include population averages (G and Rr)
+numeric_matrix_original <- pst_prop %>%
+  dplyr::select(G, Rr) %>% # Original order
+  as.matrix()
+
+# Reorder columns for horizontal flip if desired (Rr then G)
+numeric_matrix_original <- numeric_matrix_original[, c("Rr", "G")]
+
+# Set row names for the original matrix (these are your loci/methylation regions)
+# CRITICAL: Ensure these row names correspond to the 'site.id' from pst_prop
+rownames(numeric_matrix_original) <- pst_prop$site.id
+
+# Now, rows will be 'Rr', 'G' and columns will be the methylation regions
+numeric_matrix_transposed <- t(numeric_matrix_original)
+
+# --- Adjusting Ordering and Splitting for the Transposed Heatmap ---
+
+# Define the column split based on 'region' column from pst_prop
+# Ensure the order of regions is as desired (Islands, Shores, Shelves, OpenSea)
+# First, create a mapping from site.id (which are now column names of transposed matrix) to their region.
+# This requires pst_prop to have the 'site.id' and 'region' columns, and they should align.
+site_region_map <- pst_prop %>%
+  dplyr::select(site.id, region) %>%
+  # Filter to only include sites present in your matrix columns
+  filter(site.id %in% colnames(numeric_matrix_transposed)) %>%
+  # Ensure the order of this map matches the columns of your matrix
+  # This is important for 'column_split' to work correctly.
+  arrange(match(site.id, colnames(numeric_matrix_transposed)))
+
+###Convert to the correct naming for the figure
+site_region_map$region[site_region_map$region == "opensea"] <- "non-CpGi"
+site_region_map$region[site_region_map$region == "island"] <- "CpGi"
+site_region_map$region[site_region_map$region == "shore"] <- "flank"
+
+desired_region_order <- c("CpGi", "flank", "non-CpGi") # Adjust these names to match your data exactly
+
+# 2. Clustering will still be on columns (methylation regions) within each split
+# No need for manual col_hclust and col_order if you let Heatmap handle it within splits.
+# The 'cluster_columns = TRUE' in Heatmap will automatically cluster within each 'column_split' group.
+
+# The 'rows' of the transposed matrix are now G and Rr. No need to reorder them based on clustering.
+# Define the new row split for the two rows (Rr, G)
+row_split_labels <- c("H. r. rustica" = "Rr", "H. r. gutturalis" = "G") # Correctly name the vector by row names
+# This assumes your row names are exactly "Rr" and "G"
+
+# Define heatmap colors
+heatmap_colors <- colorRampPalette(c("#E0F2F7", "#A5D8FF", "#66B2FF", "#007ACC", "#004080", "#2E0854"))(100)
+
+# --- Create Heatmap (Arguments swapped for transposed matrix) ---
+rg1 <- Heatmap(numeric_matrix_transposed, # Use the transposed matrix
+               cluster_rows = FALSE, # We don't want to cluster the populations (Rr, G)
+               cluster_columns = TRUE, # We now cluster the methylation regions (original rows) within splits
+               show_row_dend = FALSE, # No dendrogram for populations
+               show_column_dend = FALSE, # Show dendrogram for methylation regions (now columns)
+               col = heatmap_colors,
+               name = "mCG/CG %",
+               row_split = factor(rownames(numeric_matrix_final), levels = names(row_split_labels)), # Ensure row split is a factor with desired order
+               column_split = factor(site_region_map$region, levels = desired_region_order), # Split methylation regions by their genomic region type
+               show_row_names = TRUE, # Show "Rr" and "G" labels (changed from FALSE to TRUE)
+               show_column_names = FALSE, # Hide methylation region IDs
+               row_names_rot = 0, # Keep "Rr" and "G" horizontal
+               column_names_rot = 90, # Rotate methylation region IDs if shown (but they are hidden)
+               row_title_gp = gpar(fontsize = 10, fontface = "italic"), # New: column titles become row titles
+               column_title_rot = 0, # New: row titles become column titles
+               column_title_gp = gpar(fontsize = 10, fontface = "bold"),
+               row_gap = unit(5, "mm"), # Gap between populations (now rows)
+               column_gap = unit(2, "mm"), # Gap between methylation region splits (now columns)
+               heatmap_legend_param = list(
+                 title = "DNAm %",
+                 at = c(0, 0.5, 1),
+                 labels = c("0%", "50%", "100%"),
+                 direction = "vertical",
+                 title_position = "topcenter",
+                 labels_rot = 0,
+                 legend_width = unit(5, "cm")
+               )
+)
+
+# Draw the heatmap
+rg1 <- draw(rg1, heatmap_legend_side = "right")
+
+summary(as.factor(site_region_map$region))
+```
+Save image 
+
+```{r}
+# Open PNG graphics device
+png("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/4_RGT_Hybrids/2_Parental_high_PST/1_Figure3_RG_Heatmap.png", width = 6, height = 2, units = "in", res = 500)
+# Draw the heatmap and control the legend position and split order
+draw(rg1, heatmap_legend_side = "right", cluster_column_slices = FALSE)
+# Close the graphics device to save the file
+dev.off()
+```
