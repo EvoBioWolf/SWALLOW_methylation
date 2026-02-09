@@ -1,0 +1,900 @@
+---
+title: "LD analysis"
+author: "Sarah Mueller"
+date: "2025-final"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+## Load libraries
+library(tidyverse)
+library(fuzzyjoin)
+```
+
+## Snp-Meth Loci
+```{r }
+snp.meth <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/3_Linkage/1_Rall/HR_Rall_snp.meth.maf2.ldwin100.gz", header= T)
+
+snp.meth.ld <- snp.meth %>%
+  mutate(distance=abs(BP_A - BP_B))
+
+#there are a few loci that made it past the filters, but are still in the CpG context and therefore shoudl not be included
+snp.meth.ld <- snp.meth.ld %>%
+  filter(!distance == 0) %>%
+  filter(!(distance == 1 & startsWith(SNP_A, "M_")))
+
+snp.meth.ld.70kb <- snp.meth.ld %>%
+  mutate(distance_bin = cut(distance, 
+                            breaks = seq(0, 70000, by = 100), 
+                            labels = seq(100, 70000, by = 100), 
+                            right = TRUE)) %>%
+  mutate(distance_bin = as.numeric(as.character(distance_bin))) %>%  # Convert factor to numeric
+  group_by(distance_bin) %>%
+  summarise(avg_R2 = mean(R2, na.rm = TRUE), .groups = "drop")
+
+snp.meth.ld.5kb <- snp.meth.ld %>%
+  mutate(distance_bin = cut(distance, 
+                            breaks = seq(0, 5000, by = 20), 
+                            labels = seq(20, 5000, by = 20), 
+                            right = TRUE)) %>%
+  mutate(distance_bin = as.numeric(as.character(distance_bin))) %>%  # Convert factor to numeric
+  group_by(distance_bin) %>%
+  summarise(avg_R2 = mean(R2, na.rm = TRUE), .groups = "drop")
+
+ggplot(snp.meth.ld.70kb, aes(x = distance_bin, y = avg_R2)) +
+  geom_point(alpha = 0.5, color = "orange") +  # Scatterplot of points
+  geom_smooth(method = "loess", se = TRUE, color = "darkorange", span = 0.2) +  # Smoothed trend line
+  #facet_wrap(~chr)+ 
+  labs(title = "SNP-METH LD Decay Plot",
+       x = "Distance",
+       y = "Average R²") +
+  theme_minimal()
+
+ggplot(snp.meth.ld.5kb, aes(x = distance_bin, y = avg_R2), na.rm=F) +
+  geom_point(alpha = 0.5, color = "orange") +  # Scatterplot of points
+  #geom_smooth(method = "loess", se = TRUE, color = "darkorange", span = 0.2) +  # Smoothed trend line
+  #facet_wrap(~chr)+ 
+  labs(title = "SNP-CpG LD Decay Plot",
+       x = "Distance",
+       y = "Average R²") +
+  theme_minimal()
+
+
+##Examine this first bin of SNP-Meth LD
+snp.meth.dist40 <- snp.meth.ld %>%
+  filter(distance < 40)
+
+
+snp.meth.dist40.r5 <- snp.meth.dist40 %>% filter(R2 > 0.5)
+summary(snp.meth.dist40.r5$distance)
+
+##Write these sites out to a table, pull them from the VCF and see the end to look in-depth at these SNP-Meth comparisons - Need to make sure the SNPs are outside of the CpG context
+#write.table(dist1, "/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/3_Linkage/1_Rall/HR.85.dist1.txt", quote=F, row.names=F)
+```
+
+## Snp-Snp LD 
+
+```{r}
+snp.ld <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/3_Linkage/1_Rall/HR_Rall_snp.maf2.ldwin100.gz", header= F)
+colnames(snp.ld) <- c("CHR_A", "BP_A", "SNP_A", "CHR_B",  "BP_B", "SNP_B", "R2") #colnames(snp.meth.ld[1:7])
+
+snp.ld <- snp.ld %>%
+  mutate(distance=abs(BP_A - BP_B))
+
+snp.ld.70kb <- snp.ld %>%
+  mutate(distance_bin = cut(distance, 
+                            breaks = seq(0, 70000, by = 100), 
+                            labels = seq(100, 70000, by = 100), 
+                            right = TRUE)) %>%
+  mutate(distance_bin = as.numeric(as.character(distance_bin))) %>%  # Convert factor to numeric
+  group_by(distance_bin) %>%
+  summarise(avg_R2 = mean(R2, na.rm = TRUE), .groups = "drop")
+
+snp.ld.5kb <- snp.ld %>%
+  mutate(distance_bin = cut(distance, 
+                            breaks = seq(0, 5000, by = 20), 
+                            labels = seq(20, 5000, by = 20), 
+                            right = TRUE)) %>%
+  mutate(distance_bin = as.numeric(as.character(distance_bin))) %>%  # Convert factor to numeric
+  group_by(distance_bin) %>%
+  summarise(avg_R2 = mean(R2, na.rm = TRUE), .groups = "drop")
+
+ggplot(snp.ld.70kb, aes(x = distance_bin, y = avg_R2)) +
+  geom_point(alpha = 0.5, color = "blue") +  # Scatterplot of points
+  #geom_smooth(method = "loess", se = FALSE, color = "red", span = 0.2) +  # Smoothed trend line
+  #facet_wrap(~chr)+ 
+  labs(title = "SNP LD Decay Plot",
+       x = "Distance",
+       y = "Average R²") +
+  theme_minimal()
+
+ggplot(snp.ld.5kb, aes(x = distance_bin, y = avg_R2), na.rm=F) +
+  geom_point(alpha = 0.5, color = "grey22") +  # Scatterplot of points
+  #geom_smooth(method = "loess", se = FALSE, color = "red", span = 0.2) +  # Smoothed trend line
+  #facet_wrap(~chr)+ 
+  labs(title = "SNP LD Decay Plot",
+       x = "Distance",
+       y = "Average R²") +
+  theme_minimal()
+
+
+##Examine this first bin of SNP-Meth LD
+snp.dist40 <- snp.ld %>%
+  filter(distance < 40)
+snp.dist40.r5 <- snp.dist40 %>% filter(R2 > 0.5)
+summary(snp.dist40.r5$distance)
+```
+
+## Meth-Meth LD
+
+```{r}
+meth.ld <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/3_Linkage/1_Rall/HR_Rall_meth.maf2.ldwin100.gz", header= F)
+colnames(meth.ld) <- c("CHR_A", "BP_A", "SNP_A", "CHR_B",  "BP_B", "SNP_B", "R2")
+
+meth.ld <- meth.ld %>%
+  mutate(distance=abs(BP_A - BP_B))
+
+meth.ld.70kb <- meth.ld %>%
+  mutate(distance_bin = cut(distance, 
+                            breaks = seq(0, 70000, by = 100), 
+                            labels = seq(100, 70000, by = 100), 
+                            right = TRUE)) %>%
+  mutate(distance_bin = as.numeric(as.character(distance_bin))) %>%  # Convert factor to numeric
+  group_by(distance_bin) %>%
+  summarise(avg_R2 = mean(R2, na.rm = TRUE), .groups = "drop")
+
+meth.ld.5kb <- meth.ld %>%
+  mutate(distance_bin = cut(distance, 
+                            breaks = seq(0, 5000, by = 20), 
+                            labels = seq(20, 5000, by = 20), 
+                            right = TRUE)) %>%
+  mutate(distance_bin = as.numeric(as.character(distance_bin))) %>%  # Convert factor to numeric
+  group_by(distance_bin) %>%
+  summarise(avg_R2 = mean(R2, na.rm = TRUE), .groups = "drop")
+
+ggplot(meth.ld.70kb, aes(x = distance_bin, y = avg_R2)) +
+  geom_point(alpha = 0.5, color = "blue") +  # Scatterplot of points
+  #geom_smooth(method = "loess", se = FALSE, color = "red", span = 0.2) +  # Smoothed trend line
+  #facet_wrap(~chr)+ 
+  labs(title = "METH LD Decay Plot",
+       x = "Distance",
+       y = "Average R²") +
+  theme_minimal()
+
+ggplot(meth.ld.5kb, aes(x = distance_bin, y = avg_R2), na.rm=F) +
+  geom_point(alpha = 0.5, color = "blue") +  # Scatterplot of points
+  #geom_smooth(method = "loess", se = FALSE, color = "red", span = 0.2) +  # Smoothed trend line
+  #facet_wrap(~chr)+ 
+  labs(title = "CpG LD Decay Plot",
+       x = "Distance",
+       y = "Average R²") +
+  theme_minimal()
+
+
+##Examine this first bin of SNP-Meth LD
+meth.dist40 <- meth.ld %>%
+  filter(distance < 40)
+
+
+meth.dist40.r5 <- meth.dist40 %>% filter(R2 > 0.5)
+summary(meth.dist40.r5$distance)
+```
+
+## Add each one into a combined plot
+
+```{r}
+df_list <- list(snp.meth = snp.meth.ld.5kb, snp = snp.ld.5kb, meth = meth.ld.5kb)
+
+snp.meth.combo.5kb <- bind_rows(lapply(names(df_list), function(name) {
+  df_list[[name]] %>% mutate(Type = name)
+}))
+
+print(snp.meth.combo.5kb)
+
+fig3 <- ggplot(snp.meth.combo.5kb, aes(x = distance_bin, y = avg_R2, color= Type), na.rm=F) +
+  geom_point(alpha = 0.5, size=4) +  # Scatterplot of points
+  #geom_smooth(method = "loess", se = FALSE, span = 0.2) +  # Smoothed trend line
+  scale_color_manual(values= c("#e53207", "grey33", "#48497e"))+
+  labs(title = "Linkage (5kb)",
+       x = "Distance",
+       y = "Average R²") +
+  theme_minimal() +
+  theme(legend.key.size = unit(0.75, "cm"), # Adjust size as needed
+        legend.text = element_text(size = 14),
+        legend.position = c(.95, .95),
+        legend.justification = c("right", "top"),
+        legend.box.just = "right",
+        legend.box.background = element_rect(fill = "white", color = "black"), 
+        legend.margin = margin(6, 6, 6, 6),
+        legend.title = element_text(size=16),
+        axis.text=element_text(size=14),
+        axis.title=element_text(size=16),
+        plot.title = element_blank())
+
+ggsave("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/3_Linkage/1_Rall/2_HR_Rall_linkage_combined_f.png", plot = fig3, width = 8, height = 3, units = "in", dpi = 300)
+
+
+snp.meth.combo.5kb <- bind_rows(lapply(names(df_list), function(name) {
+  df_list[[name]] %>% mutate(Type = name)
+})) %>%
+  mutate(Type = dplyr::recode(Type,
+                       "snp" = "SNP-SNP",
+                       "meth" = "CpG-CpG",
+                       "snp.meth" = "SNP-CpG"))
+
+fig3 <- ggplot(snp.meth.combo.5kb, aes(x = distance_bin, y = avg_R2, color = Type)) +
+  geom_line(linewidth = 1.2, alpha = 0.8) + 
+  scale_color_manual(values = c("SNP-CpG" = "#e53207", 
+                                "SNP-SNP" = "grey33", 
+                                "CpG-CpG" = "#48497e")) +
+  labs(
+    x = "Distance",
+    y = "Average R²",
+    color = NULL   # remove legend title
+  ) +
+  theme_minimal() +
+  theme(
+    legend.key.size = unit(0.75, "cm"),
+    legend.text = element_text(size = 14),
+    legend.position = c(.95, .95),
+    legend.justification = c("right", "top"),
+    legend.box.just = "right",
+    legend.box.background = element_rect(fill = "white", color = "black"),
+    legend.margin = margin(6, 6, 6, 6),
+    legend.title = element_blank(),
+    axis.text = element_text(size = 14),
+    axis.title = element_text(size = 16),
+    plot.title = element_blank()
+  )
+```
+
+Add on other datasets to look at which regions these high LD loci are in and how this compares to SNP and Methylation LD
+```{r}
+##Methylation LD plots
+meth.info <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_Pre-processing/4_methyl_calling/0_all_sites/85.20miss/prop.85.merged.20miss.rmlowv.rmout.txt", header=T)
+meth.df <- meth.info %>%
+        separate(site.id, into = c("chr", "pos"), sep= "_")
+meth.df$pos <- as.numeric(meth.df$pos)
+
+##add region information and PST
+pst_homer <- read.delim("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/2_Divergence/1_PST_FST_gw/1_pst_homer/1_pst_homer_loci_85_20miss.txt", header=T)
+pst_homer_df <- pst_homer %>%
+  separate(site.id, into = c("chr", "pos"), sep= "_")
+pst_homer_df$pos <- as.numeric(pst_homer_df$pos)
+
+```
+
+##Over-represented Regions (Meth-Meth LD)
+Create a dataframe that has the high LD loci for Meth-Meth comparisons
+```{r}
+meth.ld <- meth.ld %>%
+  filter(distance < 20000)
+
+meth.ld <- meth.ld %>%
+  mutate(
+    CHR_A = case_when(
+      CHR_A %in% c('chr01A', 'chr04A') ~ CHR_A,
+      CHR_A %in% as.character(1:9) ~ paste0('chr0', CHR_A),
+      TRUE ~ paste0('chr', CHR_A)
+    ),
+    CHR_B = case_when(
+      CHR_B %in% c('chr01A', 'chr04A') ~ CHR_B,
+      CHR_B %in% as.character(1:9) ~ paste0('chr0', CHR_B),
+      TRUE ~ paste0('chr', CHR_B)
+    ),
+    distance = (BP_B - BP_A)
+  )
+
+meth.merged.ld.a <- meth.ld %>%
+      left_join(pst_homer_df, by = c("CHR_A" = "chr", "BP_A" = "pos"))
+meth.merged.ld.a.b <- meth.merged.ld.a %>%
+  left_join(pst_homer_df, by = c("CHR_B" = "chr", "BP_B" = "pos"))
+
+#get just high ld sites
+meth.merged.ld.a.b.highld <- meth.merged.ld.a.b %>%
+      filter(R2 > 0.2)
+
+#write.table(meth.merged.ld.a.b.highld, file= "2_Rall_meth_maf2.ldwin100.r2.homer.txt", row.names=F, quote=F, sep="\t")
+```
+
+I want to compare what regions are present in the high LD dataframe and compare this to the overall dataframe. Are there regions that show a higher LD than others
+```{r}
+
+# Count occurrences of total data
+meth_ld_counts <- meth.merged.ld.a.b %>%
+  dplyr::count(category.y)
+
+#Count occurances in high LD data
+meth_highld_counts <- meth.merged.ld.a.b.highld %>%
+  dplyr::count(category.y)
+
+# Pie Chart for `sea`
+p2 <- ggplot(meth_ld_counts, aes(x = "", y = n, fill = category.y)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar(theta = "y") +
+  labs(title = "High LD CpG Regions") +
+  theme_void()  +
+  theme(legend.position = "none")
+
+p3 <- ggplot(meth_highld_counts, aes(x = "", y = n, fill = category.y)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar(theta = "y") +
+  labs(title = "High LD CpG Regions") +
+  theme_void()
+
+
+p2
+p3
+```
+
+Above was a combination of island and region, now I want to look at each separately
+```{r}
+###JUST region and annotation
+meth.merged.ld.a.b <- meth.merged.ld.a.b %>%
+  separate(Annotation.x, into = c("sea", "region"), sep = "_", remove = FALSE)
+meth.merged.ld.a.b.highld <- meth.merged.ld.a.b.highld %>%
+  separate(Annotation.x, into = c("sea", "region"), sep = "_", remove = FALSE)
+
+# Count occurrences of total data
+meth_ld_sea <- meth.merged.ld.a.b %>%
+  dplyr::count(sea)
+
+#Count occurances in high LD data
+meth_highld_sea <- meth.merged.ld.a.b.highld %>%
+  dplyr::count(sea)
+
+# Pie Chart for `sea`
+p4 <- ggplot(meth_ld_sea, aes(x = "", y = n, fill = sea)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar(theta = "y") +
+  labs(title = "High LD CpG Regions") +
+  theme_void()  +
+  theme(legend.position = "none")
+
+p5 <- ggplot(meth_highld_sea, aes(x = "", y = n, fill = sea)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar(theta = "y") +
+  labs(title = "High LD CpG Regions") +
+  theme_void()
+
+
+p4
+p5
+
+# Count occurrences of total data
+meth_ld_region <- meth.merged.ld.a.b %>%
+  dplyr::count(region)
+
+#Count occurances in high LD data
+meth_highld_region <- meth.merged.ld.a.b.highld %>%
+  dplyr::count(region)
+
+# Pie Chart for `sea`
+p6 <- ggplot(meth_ld_region, aes(x = "", y = n, fill = region)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar(theta = "y") +
+  labs(title = "High LD CpG Regions") +
+  theme_void()  +
+  theme(legend.position = "none")
+
+p7 <- ggplot(meth_highld_region, aes(x = "", y = n, fill = region)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar(theta = "y") +
+  labs(title = "High LD CpG Regions") +
+  theme_void()
+
+
+p6
+p7
+```
+
+It does seems like some regions show overall higher LD values than others. Theerfore, I want to look at how this breaks-down by distance between loci. Theerfore, I will make a binned plot for each region
+```{r}
+
+###Calculate bins based on region
+meth.ld.5kb.category <- meth.merged.ld.a.b %>%
+  mutate(distance_bin = cut(distance,
+                            breaks = seq(0, 5000, by = 20),
+                            labels = seq(20, 5000, by = 20),
+                            right = TRUE)) %>%
+  mutate(distance_bin = as.numeric(as.character(distance_bin))) %>%
+  group_by(distance_bin, category.x) %>% # Group by both distance_bin AND category
+  summarise(avg_R2 = mean(R2, na.rm = TRUE), .groups = "drop")
+
+
+#meth.ld.5kb.category <- meth.ld.5kb.category %>%
+#          filter(!category.x %in% c("island_TTS", "island_exon", "island_intron", "opensea_TTS", "opensea_exon", "opensea_intron", "shelf_TTS", #"shelf_exon", "shelf_intron", "shore_TTS", "shore_exon", "shore_intron", "NA"))
+
+#ggplot(meth.ld.5kb.category, aes(x = distance_bin, y = avg_R2, color= category.x), na.rm=F) +
+#  #geom_point(alpha = 0.5, size=2) +  # Scatterplot of points
+#  geom_smooth(method = "loess", se = FALSE, span = 0.2) +  # Smoothed trend line
+#  #scale_color_manual(values= c("#e53207", "grey33", "#48497e"))+
+#  labs(title = "Linkage (5kb)",
+#       x = "Distance",
+#       y = "Average R²") +
+#  theme_minimal() +
+#  theme(legend.key.size = unit(0.75, "cm"), # Adjust size as needed
+#        legend.text = element_text(size = 14),
+#        legend.position = c(.95, .95),
+#        legend.justification = c("right", "top"),
+#        legend.box.just = "right",
+#        legend.box.background = element_rect(fill = "white", color = "black"), 
+#        legend.margin = margin(6, 6, 6, 6),
+#        legend.title = element_blank(),
+#        axis.text=element_text(size=12),
+#        axis.title=element_text(size=14,face="bold"),
+#        plot.title = element_blank())
+
+# Now, apply the new filtering to KEEP only categories starting with "island_" or "opensea_"
+# This replaces your previous filter block
+meth.ld.5kb.category <- meth.ld.5kb.category %>%
+  dplyr::filter(grepl("^island_|^opensea_", category.x))
+
+# --- Define Custom Colors ---
+# You can list the unique categories after filtering to ensure all are covered
+# print(unique(meth.ld.5kb.category$category.x))
+
+# Example colors. You can adjust these hex codes to your preference.
+# Blueish for 'island_'
+# Orangish for 'opensea_'
+custom_colors <- c(
+  "island_Intergenic" = "#4682B4",        # SteelBlue
+  "island_promoter-TSS" = "#1F78B4",      # Lighter Blue
+  "island_exon" = "#A6CEE3",             # Pale Blue (if present)
+  "island_intron" = "#74ADD1",
+  "island_TTS" = "blue",# Medium Blue (if present)
+
+  "opensea_Intergenic" = "#FF7F00",       # Orange
+  "opensea_promoter-TSS" = "#FDBF6F",     # Light Orange
+  "opensea_exon" = "#FB9A99",             # Salmon-Orange (if present)
+  "opensea_intron" = "#E31A1C",
+  "opensea_TTS" = "red"# Reddish-Orange (if present)
+)
+
+
+# --- Plotting ---
+region_all <- ggplot(meth.ld.5kb.category, aes(x = distance_bin, y = avg_R2, color = category.x), na.rm = FALSE) +
+  geom_smooth(method = "loess", se = FALSE, span = 0.2) +
+    scale_color_manual(
+    values = custom_colors, # Use the custom color palette
+    labels = c(
+      "island_Intergenic" = "CpGi - Intergenic",
+      "island_TTS" = "CpGi - TTS",
+      "island_exon" = "CpGi - Exon",
+      "island_intron" = "CpGi - Intron",
+      "island_promoter-TSS" = "CpGi - Promoter",
+      "opensea_Intergenic" = "non-CpGi - Intergenic",
+      "opensea_exon" = "non-CpGi - Exon",
+      "opensea_intron" = "non-CpGi - Intron",
+      "opensea_TTS" = "non-CpGi - TTS",
+      "opensea_promoter-TSS" = "non-CpGi - Promoter"
+    )
+  ) +
+  labs(title = "Linkage (5kb)",
+       x = "Distance",
+       y = "Average R²") +
+  theme_minimal() +
+  theme(
+    legend.key.size = unit(0.75, "cm"),
+    legend.text = element_text(size = 10),
+    legend.position = c(.95, .95),
+    legend.justification = c("right", "top"),
+    legend.box.just = "right",
+    legend.box.background = element_rect(fill = "white", color = "black"),
+    legend.margin = margin(6, 6, 6, 6),
+    legend.title = element_blank(),
+    axis.text = element_text(size = 16, face = "plain"), # Axis text size 16, not bold
+    axis.title = element_text(size = 16, face = "plain"), # Axis title size 16, not bold
+    plot.title = element_blank() # Keep plot title blank as per your original theme
+  )
+
+#ggsave("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/3_Linkage/1_Rall/2_HR_Rall_linkage_region_all.png", plot = region_all, width = 12, height = 5, units = "in", dpi = 300)
+
+##Filter for only Intergenic and promoters in cpgi and non-CpGI
+# This replaces your previous filter block
+meth.ld.5kb.category <- meth.ld.5kb.category %>%
+  dplyr::filter(grepl("island_Intergenic|island_promoter-TSS|opensea_Intergenic|opensea_promoter-TSS", category.x))
+
+# --- Define Custom Colors ---
+# You can list the unique categories after filtering to ensure all are covered
+# print(unique(meth.ld.5kb.category$category.x))
+
+# Example colors. You can adjust these hex codes to your preference.
+# Blueish for 'island_'
+# Orangish for 'opensea_'
+custom_colors <- c(
+  "island_Intergenic" = "#4682B4",        # SteelBlue
+  "island_promoter-TSS" = "#A6CEE3",      # Lighter Blue
+  "island_exon" = "#A6CEE3",             # Pale Blue (if present)
+  "island_intron" = "#74ADD1",
+  "island_TTS" = "blue",# Medium Blue (if present)
+
+  "opensea_Intergenic" = "#FF7F00",       # Orange
+  "opensea_promoter-TSS" = "#FDBF6F",     # Light Orange
+  "opensea_exon" = "#FB9A99",             # Salmon-Orange (if present)
+  "opensea_intron" = "#E31A1C",
+  "opensea_TTS" = "red"# Reddish-Orange (if present)
+)
+
+
+# --- Plotting ---
+region_intergenic_promoter <- ggplot(meth.ld.5kb.category, aes(x = distance_bin, y = avg_R2, color = category.x), na.rm = FALSE) +
+  geom_smooth(method = "loess", se = FALSE, span = 0.2) +
+  scale_color_manual(
+    values = custom_colors, # Use the custom color palette
+    labels = c(
+      "island_Intergenic" = "CpGi - Intergenic",
+      "island_promoter-TSS" = "CpGi - Promoter",
+      "opensea_Intergenic" = "non-CpGi - Intergenic",
+      "opensea_promoter-TSS" = "non-CpGi - Promoter"
+    )
+  ) +
+  labs(title = "Linkage (5kb)",
+       x = "Distance",
+       y = "Average R²") +
+  theme_minimal() +
+  theme(
+    legend.key.size = unit(0.75, "cm"),
+    legend.text = element_text(size = 14),
+    legend.position = c(.95, .95),
+    legend.justification = c("right", "top"),
+    legend.box.just = "right",
+    legend.box.background = element_rect(fill = "white", color = "black"),
+    legend.margin = margin(6, 6, 6, 6),
+    legend.title = element_blank(),
+    axis.text = element_text(size = 16, face = "plain"),
+    axis.title = element_text(size = 16, face = "plain"),
+    plot.title = element_blank()
+  )
+
+#ggsave("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/3_Linkage/1_Rall/2_HR_Rall_linkage_region_intergenic_promtoer.png", plot = region_intergenic_promoter, width = 8, height = 3, units = "in", dpi = 300)
+
+
+
+#only between island and opensea
+###Run based on island vs. opensea
+meth.merged.ld.a.b <- meth.merged.ld.a.b %>%
+  separate(col = Annotation.y, into = c("type", "region"), sep = "_")
+
+# Assuming meth.merged.ld.a.b is your original data before grouping
+meth.ld.5kb.category <- meth.merged.ld.a.b %>%
+  dplyr::mutate(distance_bin = cut(distance,
+                                    breaks = seq(0, 5000, by = 20),
+                                    labels = seq(20, 5000, by = 20),
+                                    right = TRUE)) %>%
+  dplyr::mutate(distance_bin = as.numeric(as.character(distance_bin))) %>%
+  dplyr::group_by(distance_bin, type) %>% # Group by both distance_bin AND category
+  dplyr::summarise(avg_R2 = mean(R2, na.rm = TRUE), .groups = "drop")
+
+custom_colors <- c(
+  "island" = "darkblue",        # SteelBlue
+  "shore" = "#4682B4",             # Pale Blue (if present)
+  "shelf" = "#A6CEE3",
+  "opensea" = "#FF7F00"
+)
+
+# --- Plotting ---
+fig_ld <- ggplot(meth.ld.5kb.category, aes(x = distance_bin, y = avg_R2, color = type), na.rm = FALSE) +
+  geom_smooth(method = "loess", se = FALSE, span = 0.2) +
+  scale_color_manual(values = custom_colors) + # Use the custom color palette
+  labs(title = "Linkage (5kb)",
+       x = "Distance",
+       y = "Average R²") +
+  theme_minimal() +
+  theme(
+    legend.key.size = unit(0.75, "cm"),
+    legend.text = element_text(size = 14),
+    legend.position = c(.95, .95),
+    legend.justification = c("right", "top"),
+    legend.box.just = "right",
+    legend.box.background = element_rect(fill = "white", color = "black"),
+    legend.margin = margin(6, 6, 6, 6),
+    legend.title = element_blank(),
+    axis.text = element_text(size = 16, face = "plain"), # Axis text size 16, not bold
+    axis.title = element_text(size = 16, face = "plain"), # Axis title size 16, not bold
+    plot.title = element_blank() # Keep plot title blank as per your original theme
+  )
+
+#ggsave("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/3_Linkage/1_Rall/2_HR_Rall_linkage_region.png", plot = fig_ld, width = 8, height = 3, units = "in", dpi = 300)
+```
+
+##Over-represented Regions (SNP-Meth LD)
+I want to run the same analyses as above with the SNP-Meth dataset. Does this differ from the Meth-Meth linkage?
+First, create the high LD data
+```{r}
+#Only keep under 20,000 bp since LD is clearly below 10,000 to reduce number of loci used for comparisons. I have checked, and does not impact results
+#snp.meth.ld <- snp.meth.ld %>%
+#  filter(distance < 20000)
+
+snp.meth.ld <- snp.meth.ld %>%
+  mutate(
+    CHR_A = case_when(
+      CHR_A %in% c('chr01A', 'chr04A') ~ CHR_A,
+      CHR_A %in% as.character(1:9) ~ paste0('chr0', CHR_A),
+      TRUE ~ paste0('chr', CHR_A)
+    ),
+    CHR_B = case_when(
+      CHR_B %in% c('chr01A', 'chr04A') ~ CHR_B,
+      CHR_B %in% as.character(1:9) ~ paste0('chr0', CHR_B),
+      TRUE ~ paste0('chr', CHR_B)
+    ),
+    distance = (BP_B - BP_A)
+  )
+
+snp.meth.merged.ld.a <- snp.meth.ld %>%
+  inner_join(pst_homer_df, by = c("CHR_A" = "chr", "BP_A" = "pos"))
+snp.meth.merged.ld.b <- snp.meth.ld %>%
+  inner_join(pst_homer_df, by = c("CHR_B" = "chr", "BP_B" = "pos"))
+
+snp.meth.merged.ld.a.b <- rbind(snp.meth.merged.ld.a, snp.meth.merged.ld.b)
+
+#get just high ld sites
+snp.meth.merged.ld.a.b.highld <- snp.meth.merged.ld.a.b %>%
+  filter(R2 > 0.2)
+
+#write.table(snp.meth.merged.ld.a.b.highld, file= "2_Rall_snp_meth_maf2.ldwin100.highld.homer.txt", row.names=F, quote=F, sep="\t")
+
+```
+
+I want to compare what regions are present in the high LD dataframe and compare this to the overall dataframe. Are there regions that show a higher LD than others
+```{r}
+# Count occurrences of total data
+snp_meth_ld_counts <- snp.meth.merged.ld.a.b %>%
+  dplyr::count(category)
+
+#Count occurances in high LD data
+snp_meth_highld_counts <- snp.meth.merged.ld.a.b.highld %>%
+  dplyr::count(category)
+
+# Pie Chart for `sea`
+p2 <- ggplot(snp_meth_ld_counts, aes(x = "", y = n, fill = category)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar(theta = "y") +
+  labs(title = "Total CpG Regions") +
+  theme_void()  +
+  theme(legend.position = "none")
+
+p3 <- ggplot(snp_meth_highld_counts, aes(x = "", y = n, fill = category)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar(theta = "y") +
+  labs(title = "High LD CpG Regions") +
+  theme_void()
+
+p2 
+p3
+```
+
+Above was a combination of island and region, now I want to look at each separately
+```{r}
+###JUST region and annotation
+snp.meth.merged.ld.a.b <- snp.meth.merged.ld.a.b %>%
+  separate(Annotation, into = c("sea", "region"), sep = "_", remove = FALSE)
+snp.meth.merged.ld.a.b.highld <- snp.meth.merged.ld.a.b.highld %>%
+  separate(Annotation, into = c("sea", "region"), sep = "_", remove = FALSE)
+
+# Count occurrences of total data
+snp_meth_ld_sea <- snp.meth.merged.ld.a.b %>%
+  dplyr::count(sea)
+
+#Count occurances in high LD data
+snp_meth_highld_sea <- snp.meth.merged.ld.a.b.highld %>%
+  dplyr::count(sea)
+
+# Pie Chart for `sea`
+p4 <- ggplot(snp_meth_ld_sea, aes(x = "", y = n, fill = sea)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar(theta = "y") +
+  labs(title = "Total CpG Regions") +
+  theme_void()  +
+  theme(legend.position = "none")
+
+p5 <- ggplot(snp_meth_highld_sea, aes(x = "", y = n, fill = sea)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar(theta = "y") +
+  labs(title = "High LD CpG Regions") +
+  theme_void()
+
+
+p4 
+p5
+
+# Count occurrences of total data
+snp_meth_ld_region <- snp.meth.merged.ld.a.b %>%
+  dplyr::count(region)
+
+#Count occurances in high LD data
+snp_meth_highld_region <- snp.meth.merged.ld.a.b.highld %>%
+  dplyr::count(region)
+
+# Pie Chart for `sea`
+p6 <- ggplot(snp_meth_ld_region, aes(x = "", y = n, fill = region)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar(theta = "y") +
+  labs(title = "Total CpG Regions") +
+  theme_void()  +
+  theme(legend.position = "none")
+
+p7 <- ggplot(snp_meth_highld_region, aes(x = "", y = n, fill = region)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar(theta = "y") +
+  labs(title = "High LD CpG Regions") +
+  theme_void()
+
+
+p6 
+p7
+
+```
+
+And again, look at how these occur via distance between loci.
+```{r}
+###Calculate bins based on region
+snp.meth.ld.5kb.category <- snp.meth.merged.ld.a.b %>%
+  mutate(distance_bin = cut(distance,
+                            breaks = seq(0, 5000, by = 20),
+                            labels = seq(20, 5000, by = 20),
+                            right = TRUE)) %>%
+  mutate(distance_bin = as.numeric(as.character(distance_bin))) %>%
+  group_by(distance_bin, category) %>% # Group by both distance_bin AND category
+  summarise(avg_R2 = mean(R2, na.rm = TRUE), .groups = "drop")
+
+snp.meth.ld.5kb.category <- snp.meth.ld.5kb.category %>%
+  filter(!category %in% c("island_TTS", "island_exon", "island_intron", "opensea_TTS", "opensea_exon", "opensea_intron", "shelf_TTS", "shelf_exon", "shelf_intron", "shore_TTS", "shore_exon", "shore_intron", "NA"))
+
+ggplot(snp.meth.ld.5kb.category, aes(x = distance_bin, y = avg_R2, color= category), na.rm=F) +
+  #geom_point(alpha = 0.5, size=2) +  # Scatterplot of points
+  geom_smooth(method = "loess", se = FALSE, span = 0.2) +  # Smoothed trend line
+  #scale_color_manual(values= c("#e53207", "grey33", "#48497e"))+
+  labs(title = "Linkage (5kb)",
+       x = "Distance",
+       y = "Average R²") +
+  theme_minimal() +
+  theme(legend.key.size = unit(0.75, "cm"), # Adjust size as needed
+        legend.text = element_text(size = 14),
+        legend.position = c(.95, .95),
+        legend.justification = c("right", "top"),
+        legend.box.just = "right",
+        legend.box.background = element_rect(fill = "white", color = "black"), 
+        legend.margin = margin(6, 6, 6, 6),
+        legend.title = element_blank(),
+        axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold"),
+        plot.title = element_blank())
+```
+
+Plot only using region
+```{r}
+###Calculate bins based on region
+snp.meth.ld.5kb.sea <- snp.meth.merged.ld.a.b  %>%
+  mutate(distance_bin = cut(distance,
+                            breaks = seq(0, 5000, by = 20),
+                            labels = seq(20, 5000, by = 20),
+                            right = TRUE)) %>%
+  mutate(distance_bin = as.numeric(as.character(distance_bin))) %>%
+  group_by(distance_bin, sea) %>% # Group by both distance_bin AND category
+  summarise(avg_R2 = mean(R2, na.rm = TRUE), .groups = "drop")
+
+ggplot(snp.meth.ld.5kb.sea, aes(x = distance_bin, y = avg_R2, color= sea), na.rm=F) +
+  #geom_point(alpha = 0.5, size=2) +  # Scatterplot of points
+  geom_smooth(method = "loess", se = FALSE, span = 0.2) +  # Smoothed trend line
+  #scale_color_manual(values= c("#e53207", "grey33", "#48497e"))+
+  labs(title = "Linkage (5kb)",
+       x = "Distance",
+       y = "Average R²") +
+  theme_minimal() +
+  theme(legend.key.size = unit(0.75, "cm"), # Adjust size as needed
+        legend.text = element_text(size = 14),
+        legend.position = c(.95, .95),
+        legend.justification = c("right", "top"),
+        legend.box.just = "right",
+        legend.box.background = element_rect(fill = "white", color = "black"), 
+        legend.margin = margin(6, 6, 6, 6),
+        legend.title = element_blank(),
+        axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold"),
+        plot.title = element_blank())
+
+###Calculate bins based on region
+snp.meth.ld.5kb.region <- snp.meth.merged.ld.a.b %>%
+  mutate(distance_bin = cut(distance,
+                            breaks = seq(0, 5000, by = 20),
+                            labels = seq(20, 5000, by = 20),
+                            right = TRUE)) %>%
+  mutate(distance_bin = as.numeric(as.character(distance_bin))) %>%
+  group_by(distance_bin, region) %>% # Group by both distance_bin AND category
+  summarise(avg_R2 = mean(R2, na.rm = TRUE), .groups = "drop")
+
+ggplot(snp.meth.ld.5kb.region, aes(x = distance_bin, y = avg_R2, color= region), na.rm=F) +
+  #geom_point(alpha = 0.5, size=2) +  # Scatterplot of points
+  geom_smooth(method = "loess", se = FALSE, span = 0.2) +  # Smoothed trend line
+  #scale_color_manual(values= c("#e53207", "grey33", "#48497e"))+
+  labs(title = "Linkage (5kb)",
+       x = "Distance",
+       y = "Average R²") +
+  theme_minimal() +
+  theme(legend.key.size = unit(0.75, "cm"), # Adjust size as needed
+        legend.text = element_text(size = 14),
+        legend.position = c(.95, .95),
+        legend.justification = c("right", "top"),
+        legend.box.just = "right",
+        legend.box.background = element_rect(fill = "white", color = "black"), 
+        legend.margin = margin(6, 6, 6, 6),
+        legend.title = element_blank(),
+        axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold"),
+        plot.title = element_blank())
+
+```
+
+```{r}
+# This replaces your previous filter block
+snp.meth.ld.5kb.category <- snp.meth.ld.5kb.category %>%
+  dplyr::filter(grepl("^island|^opensea_", category))
+
+# --- Define Custom Colors ---
+# You can list the unique categories after filtering to ensure all are covered
+# print(unique(meth.ld.5kb.category$category.x))
+
+# Example colors. You can adjust these hex codes to your preference.
+# Blueish for 'island_'
+# Orangish for 'opensea_'
+custom_colors <- c(
+  "island_Intergenic" = "#4682B4",        # SteelBlue
+  "island_promoter-TSS" = "#A6CEE3",      # Lighter Blue
+  "island_exon" = "#A6CEE3",             # Pale Blue (if present)
+  "island_intron" = "#74ADD1",
+  "island_TTS" = "blue",# Medium Blue (if present)
+
+  "opensea_Intergenic" = "#FF7F00",       # Orange
+  "opensea_promoter-TSS" = "#FDBF6F",     # Light Orange
+  "opensea_exon" = "#FB9A99",             # Salmon-Orange (if present)
+  "opensea_intron" = "#E31A1C",
+  "opensea_TTS" = "red"# Reddish-Orange (if present)
+)
+
+
+# --- Plotting ---
+sm_region_intergenic_promoter <- ggplot(snp.meth.ld.5kb.category, aes(x = distance_bin, y = avg_R2, color = category), na.rm = FALSE) +
+  geom_smooth(method = "loess", se = FALSE, span = 0.2) +
+    scale_color_manual(
+    values = custom_colors, # Use the custom color palette
+    labels = c(
+      "island_Intergenic" = "CpGi - Intergenic",
+      "island_TTS" = "CpGi - TTS",
+      "island_exon" = "CpGi - Exon",
+      "island_intron" = "CpGi - Intron",
+      "island_promoter-TSS" = "CpGi - Promoter",
+      "opensea_Intergenic" = "non-CpGi - Intergenic",
+      "opensea_exon" = "non-CpGi - Exon",
+      "opensea_intron" = "non-CpGi - Intron",
+      "opensea_TTS" = "non-CpGi - TTS",
+      "opensea_promoter-TSS" = "non-CpGi - Promoter"
+    )
+  ) +
+  labs(title = "Linkage (5kb)",
+       x = "Distance",
+       y = "Average R²") +
+  theme_minimal() +
+  guides(color = guide_legend(ncol = 2)) +
+  theme(
+    legend.key.size = unit(0.75, "cm"),
+    legend.text = element_text(size = 14),
+    legend.position = c(.95, .95),
+    legend.justification = c("right", "top"),
+    legend.box.just = "right",
+    legend.box.background = element_rect(fill = "white", color = "black"),
+    legend.margin = margin(6, 6, 6, 6),
+    legend.title = element_blank(),
+    axis.text = element_text(size = 16, face = "plain"),
+    axis.title = element_text(size = 16, face = "plain"),
+    plot.title = element_blank()
+  )
+
+ggsave("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/3_Linkage/1_Rall/2_HR_Rall_snp_meth_linkage_region_all.png", plot = sm_region_intergenic_promoter, width = 12, height = 5, units = "in", dpi = 300)
+
+###in shelves there is high in promoters...not sure why??
+
+```
+
+

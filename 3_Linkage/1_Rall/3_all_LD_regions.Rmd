@@ -1,0 +1,1060 @@
+---
+title: "LD - Inversion chr11"
+author: "Sarah Mueller"
+date: "2025-final"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(vegan)
+library(plyr)
+library(dplyr)
+library(readxl)
+library(ggrepel)
+library(tidyverse)
+library(ggplotify)
+library(plotly)
+library(ggnewscale)
+library(patchwork)
+```
+
+##High LD Regions
+
+I noticed a high LD region on chromosome 11, so I want to look into this region. However, I would like to see if there are other regions in the genome that show high LD as well.
+
+First, create high LD datsets (this only needs to be completed once, then you can skip this section for subsequent analyses).
+
+```{r}
+#SNP-Meth comparisons
+#snp.meth.high.ld <- read.delim("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/3_Linkage/1_Rall/2_Rall_snp_meth_maf2.ldwin100.r2.homer.txt", header=T)
+
+snp.meth <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/3_Linkage/1_Rall/HR_Rall_snp.meth.maf2.ldwin100.gz", header= T)
+
+snp.meth.ld <- snp.meth %>%
+  mutate(distance=abs(BP_A - BP_B))
+
+#there are a few loci that made it past the filters, but are still in the CpG context and therefore shoudl not be included
+snp.meth.ld <- snp.meth.ld %>%
+  filter(!distance == 0) %>%
+  filter(!(distance == 1 & startsWith(SNP_A, "M_")))
+
+snp.meth.ld.100 <- snp.meth.ld %>% filter(R2 > 0.3)
+
+
+meth.high.ld <- read.delim("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/3_Linkage/1_Rall/2_Rall_meth_maf2.ldwin100.r2.homer.txt", header=T)
+
+snp.high.ld <- read.delim("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/3_Linkage/1_Rall/2_Rall_snp_maf2.ldwin100.r2.homer.rec.txt", header=T)
+
+```
+
+LD between SNPs across chromosomes
+
+```{r}
+snp.chr <- ggplot(snp.high.ld, aes(x = CHR_A, y = R2), na.rm=T) +
+  geom_boxplot(coef = 1, outlier.shape = NA, fill= "skyblue")+
+  labs(title = "Linkage by chromsome",
+       y = "Average R² (SNPs)") +
+  theme_minimal() +
+  coord_flip()+
+  #ylim(0.2,0.7)+
+  theme(legend.key.size = unit(0.75, "cm"), # Adjust size as needed
+        legend.text = element_text(size = 14),
+        legend.position = c(.95, .95),
+        legend.justification = c("right", "top"),
+        legend.box.just = "right",
+        legend.box.background = element_rect(fill = "white", color = "black"), 
+        legend.margin = margin(6, 6, 6, 6),
+        legend.title = element_blank(),
+        axis.text=element_text(size=12),
+        axis.title.x = element_text(size=14,face="bold"),
+        axis.title.y = element_blank(),
+        plot.title = element_blank())
+
+snp.chr
+
+ggsave("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/3_Linkage/1_Rall/2_high_LD_SNP.png", plot = snp.chr, width = 4, height = 9, units = "in", dpi = 300)
+```
+
+
+```{r}
+snp.meth.chr <- ggplot(snp.meth.ld.100, aes(x = CHR_A, y = R2), na.rm=T) +
+  geom_boxplot(coef = 1, outlier.shape = NA, fill= "skyblue")+
+  labs(title = "Linkage by chromsome",
+       y = "Average R²") +
+  theme_minimal() +
+  coord_flip()+
+  #ylim(0.2,0.7)+
+  theme(legend.key.size = unit(0.75, "cm"), # Adjust size as needed
+        legend.text = element_text(size = 14),
+        legend.position = c(.95, .95),
+        legend.justification = c("right", "top"),
+        legend.box.just = "right",
+        legend.box.background = element_rect(fill = "white", color = "black"), 
+        legend.margin = margin(6, 6, 6, 6),
+        legend.title = element_blank(),
+        axis.text=element_text(size=12),
+        axis.title.x = element_text(size=14,face="bold"),
+        axis.title.y = element_blank(),
+        plot.title = element_blank())
+
+snp.meth.chr
+```
+
+Plot the same for Meth-Meth comparisons
+
+```{r}
+meth.chr <- ggplot(meth.high.ld, aes(x = CHR_A, y = R2), na.rm=T) +
+  geom_boxplot(coef = 1, outlier.shape = NA, fill= "skyblue")+
+  labs(title = "Linkage by chromsome",
+       y = "Average R²") +
+  theme_minimal() +
+  coord_flip()+
+  theme(legend.key.size = unit(0.75, "cm"), # Adjust size as needed
+        legend.text = element_text(size = 14),
+        legend.position = c(.95, .95),
+        legend.justification = c("right", "top"),
+        legend.box.just = "right",
+        legend.box.background = element_rect(fill = "white", color = "black"), 
+        legend.margin = margin(6, 6, 6, 6),
+        legend.title = element_blank(),
+        axis.text=element_text(size=12),
+        axis.title.x = element_text(size=14,face="bold"),
+        axis.title.y = element_blank(),
+        plot.title = element_blank())
+
+meth.chr
+
+```
+##PLot both together
+
+```{r}
+# --- 1. Combine Data Frames and Recode comparison_type ---
+combined_ld_data <- dplyr::bind_rows(
+  snp.meth.high.ld %>% dplyr::mutate(comparison_type = "SNP-Meth"),
+  meth.high.ld %>% dplyr::mutate(comparison_type = "Meth-Meth")
+) %>%
+  dplyr::mutate(
+    comparison_type = forcats::fct_recode(
+      comparison_type,
+      "SNP-CpG" = "SNP-Meth",
+      "CpG-CpG" = "Meth-Meth"
+    )
+  )
+
+# Ensure CHR_A is a factor (and optionally reorder)
+combined_ld_data$CHR_A <- factor(combined_ld_data$CHR_A)
+
+# --- Define Custom Fill Colors ---
+# These are approximate hex codes based on your image.
+# You can fine-tune them if you have exact values.
+custom_fill_colors <- c(
+  "CpG-CpG" = "#D30000",      # A vibrant orange-red like 'meth' in your image
+  "SNP-CpG" = "#6A5ACD"       # A muted blue-purple like 'snp.meth' in your image
+)
+
+
+# --- 2. Create the Single Combined Plot with Faceting and updated styling ---
+merged_chr_plot <- ggplot(combined_ld_data, aes(x = CHR_A, y = R2)) +
+  geom_boxplot(coef = 1, outlier.shape = NA, aes(fill = comparison_type)) +
+  labs(
+    x = "Chromosome",
+    y = "Average R²",
+    fill = "Comparison Type"
+  ) +
+  theme_minimal() +
+  coord_flip() +
+  facet_wrap(~ comparison_type, ncol = 2, scales = "free_x") +
+  # Add the manual fill scale for boxplot colors
+  scale_fill_manual(values = custom_fill_colors) + # <--- ADDED THIS LINE
+  theme(
+    legend.position = "none",
+    legend.justification = c("right", "top"),
+    legend.background = element_rect(fill = "white", color = NA),
+    legend.key.size = unit(0.75, "cm"),
+    legend.text = element_text(size = 14, face = "plain"),
+    legend.title = element_text(size = 14, face = "plain"),
+    axis.text.y = element_text(size = 14, face = "plain"),
+    axis.text.x = element_text(size = 14, face = "plain"),
+    axis.title.y = element_text(size = 14, face = "plain"),
+    axis.title.x = element_text(size = 14, face = "plain"),
+    plot.title = element_blank(),
+    strip.text = element_text(size = 14, face = "plain"),
+    panel.spacing = unit(1, "lines")
+  )
+
+# Print the combined plot
+print(merged_chr_plot)
+
+ggsave("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/3_Linkage/1_Rall/2_high_LD_SNP_CpG.png", plot = merged_chr_plot, width = 7, height = 9, units = "in", dpi = 300)
+
+```
+
+
+#SNP-Meth High LD
+There seems to be 2 chromosomes that fall as outliers in the Snp-Meth per chromosome plot. Therefore, I want to look more in-depth here.
+
+##Chromosome 11
+Look at the region in chromosome 11. I previously found evidence of an inversion in the European rustica population in chromosome 11.
+
+```{r}
+# Filter for chromosome 11
+chr11_data <- snp.meth.high.ld %>%
+  filter(CHR_A == "chr11" & CHR_B == "chr11") 
+chr11_data$BP_A <- as.numeric(chr11_data$BP_A)
+chr11_data$BP_B <- as.numeric(chr11_data$BP_B)
+
+chr11 <- ggplot(chr11_data, aes(x = BP_A, y = R2), na.rm=T) +
+  geom_point()+
+  labs(title = "Linkage by chromsome",
+       x = "Position",
+       y = "Average R²") +
+  theme_minimal() +
+  theme(legend.key.size = unit(0.75, "cm"), # Adjust size as needed
+        legend.text = element_text(size = 14),
+        legend.position = c(.95, .95),
+        legend.justification = c("right", "top"),
+        legend.box.just = "right",
+        legend.box.background = element_rect(fill = "white", color = "black"), 
+        legend.margin = margin(6, 6, 6, 6),
+        legend.title = element_blank(),
+        axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold"),
+        plot.title = element_blank())
+
+chr11
+
+chr11 <- ggplot(subset(chr11_data, BP_A > 1.75e7), aes(x = BP_A, y = R2), na.rm=TRUE) +
+  geom_point() +
+  labs(title = "Linkage by chromosome",
+       x = "Position",
+       y = "Average R²") +
+  theme_minimal() +
+  theme(legend.key.size = unit(0.75, "cm"),
+        legend.text = element_text(size = 14),
+        legend.position = c(0.95, 0.95),
+        legend.justification = c("right", "top"),
+        legend.box.just = "right",
+        legend.box.background = element_rect(fill = "white", color = "black"),
+        legend.margin = margin(6, 6, 6, 6),
+        legend.title = element_blank(),
+        axis.text = element_text(size = 12),
+        axis.title = element_text(size = 14, face = "bold"),
+        plot.title = element_blank())
+
+# Print the plot
+print(chr11)
+
+chr11.dist <- ggplot(chr11_data, aes(x = distance, y = R2), na.rm=T) +
+  geom_point()+
+  labs(title = "Linkage by chromsome",
+       x = "Distance",
+       y = "Average R²") +
+  theme_minimal() +
+  theme(legend.key.size = unit(0.75, "cm"), # Adjust size as needed
+        legend.text = element_text(size = 14),
+        legend.position = c(.95, .95),
+        legend.justification = c("right", "top"),
+        legend.box.just = "right",
+        legend.box.background = element_rect(fill = "white", color = "black"), 
+        legend.margin = margin(6, 6, 6, 6),
+        legend.title = element_blank(),
+        axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold"),
+        plot.title = element_blank())
+
+chr11.dist
+```
+
+I want to look more indepth at what is happening to these methylation loci around the inversion 
+
+In order to do that I need to load in homer information first
+```{r}
+homer_cpgi <- read.delim("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/0_Pre-processing/4_methyl_calling/1_CpG_islands/85.20miss/homer.cpgi.prop.85.merged.20miss.rmlowv.rmout.txt", header=T)
+
+homer.cpgi.chr11 <- homer_cpgi %>% filter(Chr == "chr11", Start > 1.8e7)
+
+homer_plot <- ggplot(homer.cpgi.chr11, aes(xmin = Start - 50000, xmax = End + 50000, fill = category)) +
+  geom_rect(ymin = 0, ymax = .1) +
+  scale_y_continuous(NULL, breaks = NULL, limits = c(0, .1)) +
+  labs(title = "CpG Island Regions on Chromosome 11",
+       x = "Genomic Position (bp)",
+       y = NULL,
+       fill = "Category") +
+ theme_minimal() +
+  theme(
+    legend.key.size = unit(0.75, "cm"),
+    legend.text = element_text(size = 14),
+    #legend.position = "topright",
+    legend.justification = c("right", "top"),
+    legend.box.just = "right",
+    legend.box.background = element_rect(fill = "white", color = "black"),
+    legend.margin = margin(6, 6, 6, 6),
+    legend.title = element_text(size = 10),
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_blank(),
+    axis.title.x = element_text(size = 14, face = "bold"),
+    axis.title.y = element_blank(),
+    plot.title = element_blank() 
+  )
+
+homer_plot
+```
+
+
+```{r}
+vcf <- read.delim("4_chr11_inv_snps.vcf", header=T)
+
+#Remove depth information from SNPs
+vcf <- vcf %>%
+  mutate(across(contains("_ADL_"), ~ sub(":.*", "", .)))
+
+vcf <- vcf %>%
+  mutate(across(contains("_ADL_"),
+                ~ str_replace_all(., c("1/1" = "2", "1\\|1" = "2",
+                                       "0/0" = "0", "0\\|0" = "0",
+                                       "0/1" = "1", "0\\|1" = "1",
+                                       "./." = "NA", ".\\|." = "NA"))))
+
+vcf <- vcf %>%
+  mutate(across(contains("_ADL_"), as.numeric))
+
+# 2. Calculate average methylation proportion
+r_cols <- grep("_R_", names(vcf), value = TRUE)
+vcf$avg_snp_R <- rowMeans(vcf[, r_cols], na.rm = TRUE)
+
+r_cols <- grep("_G_", names(vcf), value = TRUE)
+vcf$avg_snp_G <- rowMeans(vcf[, r_cols], na.rm = TRUE)
+
+r_cols <- grep("_T_", names(vcf), value = TRUE)
+vcf$avg_snp_T <- rowMeans(vcf[, r_cols], na.rm = TRUE)
+
+#2.5 Calculate averages based on inversion or no inversion
+r_cols <- grep("CN_14_G_1094_BL_ADL_F|EG_15_S_1611_BL_ADL_U|FI_18_R_18FI082_BL_ADL_M|CH_20_R_20CH006_BL_ADL_F|CH_18_R_18CH081_BL_ADL_M", names(vcf), value = TRUE)
+vcf$avg_snp_lowfreq <- rowMeans(vcf[, r_cols], na.rm = TRUE)
+
+r_cols <- grep("EG_15_S_1612_BL_ADL_U|EG_15_S_1610_BL_ADL_U|CN_14_G_1097_BL_ADL_F|RU_13_R_VN96123_BL_ADL_M|RU_13_R_VN96106_BL_ADL_M|CN_14_G_1104_BL_ADL_M|RU_13_R_VN6110_BL_ADL_M|FI_18_R_18FI002_BL_ADL_M|CN_14_G_1089_BL_ADL_M|CN_14_G_1103_BL_ADL_M|CN_14_G_1102_BL_ADL_M|EG_15_S_1602_BL_ADL_U|CN_14_G_1098_BL_ADL_F|CN_14_G_1093_BL_ADL_M|DE_20_R_20DE008_BL_ADL_F|RU_13_R_VN96298_BL_ADL_F|US_02_E_3121-88807_BL_ADL_U|RU_13_R_VN96102_BL_ADL_M|RU_13_R_VN96122_BL_ADL_F|IL_15_TV_X242014_BL_ADL_F|CH_19_R_19CH008_BL_ADL_F|FI_19_R_19FI052_BL_ADL_F|CN_14_G_1105_BL_ADL_F|IL_15_TV_X242018_BL_ADL_M|CN_14_G_1099_BL_ADL_M|CH_20_R_20CH003_BL_ADL_M|CH_19_R_19CH091_BL_ADL_M|US_02_E_2171-28179_BL_ADL_U|EG_15_S_1609_BL_ADL_U|US_02_E_3121-88831_BL_ADL_U", names(vcf), value = TRUE)
+vcf$avg_snp_mid <- rowMeans(vcf[, r_cols], na.rm = TRUE)
+
+r_cols <- grep("CH_18_R_18CH024_BL_ADL_M|CN_14_G_1100_BL_ADL_F|IL_15_TV_X242047_BL_ADL_M|DE_19_R_19DE108_BL_ADL_M|RU_13_T_NB027_BL_ADL_M|DE_19_R_19DE110_BL_ADL_F|RU_13_R_VN96117_BL_ADL_F|DE_20_R_20DE145_BL_ADL_M|US_02_E_2171-28186_BL_ADL_U|CH_19_R_19CH005_BL_ADL_M|RU_17_T_NB022_BL_ADL_M|DE_19_R_19DE054_BL_ADL_M|IL_15_TV_X242077_BL_ADL_M|RU_13_T_NB029_BL_ADL_F|EG_15_S_1605_BL_ADL_U|RU_13_R_VN96113_BL_ADL_F|RU_13_T_NB019_BL_ADL_M|IL_15_TV_X242048_BL_ADL_F|RU_13_T_NB033_BL_ADL_F|CH_20_R_20CH005_BL_ADL_M|RU_13_T_NB041_BL_ADL_F|EG_15_S_1603_BL_ADL_U|RU_13_T_NB040_BL_ADL_F|IL_15_TV_X242072_BL_ADL_M|RU_13_R_VN96116_BL_ADL_M|RU_13_R_VN96118_BL_ADL_F|CN_14_G_1086_BL_ADL_M|DE_19_R_19DE043_BL_ADL_M|RU_17_T_NB030_BL_ADL_F|FI_19_R_19FI106_BL_ADL_M|RU_13_R_VN96124_BL_ADL_F|DE_20_R_20DE078_BL_ADL_M|FI_19_R_19FI067_BL_ADL_M|IL_15_TV_X242019_BL_ADL_F|RU_13_T_NB028_BL_ADL_F|DE_20_R_20DE139_BL_ADL_F|IL_15_TV_X242015_BL_ADL_F|FI_18_R_18FI020_BL_ADL_F|RU_13_T_NB031_BL_ADL_F|US_02_E_2171-28178_BL_ADL_U|EG_15_S_1608_BL_ADL_U|DE_19_R_19DE057_BL_ADL_F|FI_19_R_19FI092_BL_ADL_M|RU_13_R_VN96300_BL_ADL_F|RU_13_T_NB038_BL_ADL_M|US_02_E_3121-88841_BL_ADL_U|US_02_E_2171-28193_BL_ADL_U|DE_20_R_20DE071_BL_ADL_M|FI_19_R_19FI037_BL_ADL_M|DE_19_R_19DE044_BL_ADL_F", names(vcf), value = TRUE)
+vcf$avg_snp_highfreq <- rowMeans(vcf[, r_cols], na.rm = TRUE)
+
+
+```
+
+```{r}
+
+chr11_inv <- chr11_data %>% filter(BP_A > 1.8e7, BP_A < 2.13e7)
+
+chr11_inv <- chr11_inv %>%
+  mutate(
+    meth.site = case_when(
+      is.character(SNP_A) & startsWith(SNP_A, "M_") ~ SNP_A,
+      is.character(SNP_B) & startsWith(SNP_B, "M_") ~ SNP_B,
+      TRUE ~ NA_character_
+    ),
+    snp.site = case_when(
+      is.character(SNP_A) & startsWith(SNP_A, "S_") ~ SNP_A,
+      is.character(SNP_B) & startsWith(SNP_B, "S_") ~ SNP_B,
+      TRUE ~ NA_character_
+    )
+  )
+
+unique_meth <- length(unique(chr11_inv$meth.site))
+unique_snp <- length(unique(chr11_inv$snp.site))
+
+chr11_inv_hld <- chr11_inv %>% filter(R2 > .6)
+
+unique_meth <- length(unique(chr11_inv_hld$meth.site))
+unique_snp <- length(unique(chr11_inv_hld$snp.site))
+
+chr11_inv_hld <- chr11_inv_hld %>% separate(category, into= c("region", "annotation"), sep = "_")
+
+# 1. Split meth.site and snp.site into chr and bp, append _meth and _snp
+chr11_inv_hld <- chr11_inv_hld %>%
+  rowwise() %>%
+  mutate(
+    chr_meth = ifelse(!is.na(meth.site), str_split(meth.site, "_")[[1]][1], NA_character_), #handle null
+    bp_meth = ifelse(!is.na(meth.site), as.numeric(str_split(meth.site, "_")[[1]][2]), NA_real_), #handle null
+    chr_snp = ifelse(!is.na(snp.site), str_split(snp.site, ":")[[1]][1], NA_character_),  #handle null
+    bp_snp = ifelse(!is.na(snp.site), as.numeric(str_split(snp.site, ":")[[1]][2]), NA_real_) #handle null
+  )
+
+#chr11_inv_hld$category_numeric <- as.numeric(as.factor(chr11_inv_hld$category))
+
+# 2. Calculate average methylation proportion
+r_cols <- grep("_R_", names(chr11_inv_hld), value = TRUE)
+chr11_inv_hld$avg_methylation_R <- rowMeans(chr11_inv_hld[, r_cols], na.rm = TRUE)
+
+r_cols <- grep("_G_", names(chr11_inv_hld), value = TRUE)
+chr11_inv_hld$avg_methylation_G <- rowMeans(chr11_inv_hld[, r_cols], na.rm = TRUE)
+
+r_cols <- grep("_T_", names(chr11_inv_hld), value = TRUE)
+chr11_inv_hld$avg_methylation_T <- rowMeans(chr11_inv_hld[, r_cols], na.rm = TRUE)
+
+#2.5 Calculate averages based on inversion or no inversion
+r_cols <- grep("CN_14_G_1094_BL_ADL_F|EG_15_S_1611_BL_ADL_U|FI_18_R_18FI082_BL_ADL_M|CH_20_R_20CH006_BL_ADL_F|CH_18_R_18CH081_BL_ADL_M", names(chr11_inv_hld), value = TRUE)
+chr11_inv_hld$avg_methylation_lowfreq <- rowMeans(chr11_inv_hld[, r_cols], na.rm = TRUE)
+
+r_cols <- grep("EG_15_S_1612_BL_ADL_U|EG_15_S_1610_BL_ADL_U|CN_14_G_1097_BL_ADL_F|RU_13_R_VN96123_BL_ADL_M|RU_13_R_VN96106_BL_ADL_M|CN_14_G_1104_BL_ADL_M|RU_13_R_VN6110_BL_ADL_M|FI_18_R_18FI002_BL_ADL_M|CN_14_G_1089_BL_ADL_M|CN_14_G_1103_BL_ADL_M|CN_14_G_1102_BL_ADL_M|EG_15_S_1602_BL_ADL_U|CN_14_G_1098_BL_ADL_F|CN_14_G_1093_BL_ADL_M|DE_20_R_20DE008_BL_ADL_F|RU_13_R_VN96298_BL_ADL_F|US_02_E_3121-88807_BL_ADL_U|RU_13_R_VN96102_BL_ADL_M|RU_13_R_VN96122_BL_ADL_F|IL_15_TV_X242014_BL_ADL_F|CH_19_R_19CH008_BL_ADL_F|FI_19_R_19FI052_BL_ADL_F|CN_14_G_1105_BL_ADL_F|IL_15_TV_X242018_BL_ADL_M|CN_14_G_1099_BL_ADL_M|CH_20_R_20CH003_BL_ADL_M|CH_19_R_19CH091_BL_ADL_M|US_02_E_2171-28179_BL_ADL_U|EG_15_S_1609_BL_ADL_U|US_02_E_3121-88831_BL_ADL_U", names(chr11_inv_hld), value = TRUE)
+chr11_inv_hld$avg_methylation_mid <- rowMeans(chr11_inv_hld[, r_cols], na.rm = TRUE)
+
+r_cols <- grep("CH_18_R_18CH024_BL_ADL_M|CN_14_G_1100_BL_ADL_F|IL_15_TV_X242047_BL_ADL_M|DE_19_R_19DE108_BL_ADL_M|RU_13_T_NB027_BL_ADL_M|DE_19_R_19DE110_BL_ADL_F|RU_13_R_VN96117_BL_ADL_F|DE_20_R_20DE145_BL_ADL_M|US_02_E_2171-28186_BL_ADL_U|CH_19_R_19CH005_BL_ADL_M|RU_17_T_NB022_BL_ADL_M|DE_19_R_19DE054_BL_ADL_M|IL_15_TV_X242077_BL_ADL_M|RU_13_T_NB029_BL_ADL_F|EG_15_S_1605_BL_ADL_U|RU_13_R_VN96113_BL_ADL_F|RU_13_T_NB019_BL_ADL_M|IL_15_TV_X242048_BL_ADL_F|RU_13_T_NB033_BL_ADL_F|CH_20_R_20CH005_BL_ADL_M|RU_13_T_NB041_BL_ADL_F|EG_15_S_1603_BL_ADL_U|RU_13_T_NB040_BL_ADL_F|IL_15_TV_X242072_BL_ADL_M|RU_13_R_VN96116_BL_ADL_M|RU_13_R_VN96118_BL_ADL_F|CN_14_G_1086_BL_ADL_M|DE_19_R_19DE043_BL_ADL_M|RU_17_T_NB030_BL_ADL_F|FI_19_R_19FI106_BL_ADL_M|RU_13_R_VN96124_BL_ADL_F|DE_20_R_20DE078_BL_ADL_M|FI_19_R_19FI067_BL_ADL_M|IL_15_TV_X242019_BL_ADL_F|RU_13_T_NB028_BL_ADL_F|DE_20_R_20DE139_BL_ADL_F|IL_15_TV_X242015_BL_ADL_F|FI_18_R_18FI020_BL_ADL_F|RU_13_T_NB031_BL_ADL_F|US_02_E_2171-28178_BL_ADL_U|EG_15_S_1608_BL_ADL_U|DE_19_R_19DE057_BL_ADL_F|FI_19_R_19FI092_BL_ADL_M|RU_13_R_VN96300_BL_ADL_F|RU_13_T_NB038_BL_ADL_M|US_02_E_3121-88841_BL_ADL_U|US_02_E_2171-28193_BL_ADL_U|DE_20_R_20DE071_BL_ADL_M|FI_19_R_19FI037_BL_ADL_M|DE_19_R_19DE044_BL_ADL_F", names(chr11_inv_hld), value = TRUE)
+chr11_inv_hld$avg_methylation_highfreq <- rowMeans(chr11_inv_hld[, r_cols], na.rm = TRUE)
+
+
+# Create the plot for the different inversions
+chr11_plot <- ggplot(chr11_inv_hld) +
+  geom_rect(aes(xmin = bp_snp - 1000, xmax = bp_snp + 1000, ymin = 0.19, ymax = 0.21, color = region), alpha = 0.5, na.rm = TRUE) +
+  ylim(0.18, 0.53) +
+  geom_point(aes(x = bp_meth, y = 0.5, size = 5, fill = avg_methylation_lowfreq),
+            shape = 21, color = "black", na.rm = TRUE) +
+  geom_point(aes(x = bp_meth, y = 0.4, size = 5, fill = avg_methylation_mid),
+            shape = 21, color = "black", na.rm = TRUE) +
+  geom_point(aes(x = bp_meth, y = 0.3, size = 5, fill = avg_methylation_highfreq),
+            shape = 21, color = "black", na.rm = TRUE) +
+  scale_fill_gradient(low = "white", high = "black") +
+  #scale_color_manual(values = c("red", "blue", "green", "purple")) +
+  labs(
+    title = "Linkage by chromosome with SNP and Methylation Sites",
+    x = "Position (BP)",
+    y = "PST (blue line)",
+    size = "Avg Methylation",
+    fill = "Region" # Changed fill label to "Region"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.key.size = unit(0.75, "cm"),
+    legend.text = element_text(size = 14),
+    #legend.position = "topright",
+    legend.justification = c("right", "top"),
+    legend.box.just = "right",
+    legend.box.background = element_rect(fill = "white", color = "black"),
+    legend.margin = margin(6, 6, 6, 6),
+    legend.title = element_text(size = 10),
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    plot.title = element_blank()
+  ) +
+  scale_size_continuous(range = c(2, 8))
+
+# Print the plot
+print(chr11_plot)
+
+chr_pos <- chr11_inv_hld %>%
+     distinct(chr_snp, bp_snp) 
+
+#write.table(chr_pos, "/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/3_Linkage/1_chr11/4_chr11_inv_snps.txt", quote=F, row.names=F)
+
+chr_pos_meth <- chr11_inv_hld %>%
+     distinct(chr_meth, bp_meth) 
+
+#write.table(chr_pos_meth, "/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/3_Linkage/1_chr11/4_chr11_inv_meth.txt", quote=F, row.names=F)
+
+```
+
+```{r}
+##Try plotting differently
+chr11_inv_hld <- chr11_inv_hld %>%
+  mutate(
+    # Create temporary columns to hold original values before potential swap
+    temp_SNP_A = SNP_A,
+    temp_SNP_B = SNP_B,
+    # Conditionally assign new SNP_A values: if SNP_A starts with "S_" AND SNP_B starts with "M_",
+    # then the new SNP_A becomes the original SNP_B; otherwise, it remains the original SNP_A.
+    SNP_A = case_when(
+      grepl("^S_", temp_SNP_A) & grepl("^M_", temp_SNP_B) ~ temp_SNP_B,
+      TRUE ~ temp_SNP_A
+    ),
+    # Conditionally assign new SNP_B values: if SNP_A starts with "S_" AND SNP_B starts with "M_",
+    # then the new SNP_B becomes the original SNP_A; otherwise, it remains the original SNP_B.
+    SNP_B = case_when(
+      grepl("^S_", temp_SNP_A) & grepl("^M_", temp_SNP_B) ~ temp_SNP_A,
+      TRUE ~ temp_SNP_B
+    )
+  ) %>%
+  # Remove the temporary columns after the swap
+  select(-temp_SNP_A, -temp_SNP_B)
+
+
+#Number each methylation value 1-n(CPG) in order to plot where they do not overlap
+unique_snp_a <- unique(chr11_inv_hld$SNP_A)
+snp_a_numeric_map <- setNames((seq_along(unique_snp_a) - 1) %% 20 + 1, unique_snp_a)
+# Add the new numeric column using dplyr::mutate
+chr11_inv_hld <- chr11_inv_hld %>%
+  mutate(SNP_A_numeric = snp_a_numeric_map[SNP_A])
+
+
+#convert to island vs. non-island
+chr11_inv_hld <- chr11_inv_hld %>%
+  mutate(
+    region = ifelse(region == "shore", "CpGi", region),
+    region = ifelse(region == "island", "CpGi", region),
+     region = ifelse(region == "opensea", "non-CpGi", region)
+  )
+
+# Create the plot for the different inversions
+chr11_plot <- ggplot(chr11_inv_hld) +
+  # First geom_rect for regions, filled by 'region'
+ # geom_rect(aes(xmin = SNP_A_numeric-1, xmax = SNP_A_numeric + 1, ymin = .6, ymax = .62, fill = region),
+   #         alpha = 0.5, na.rm = TRUE) +
+  # Define the scale for the first fill aesthetic (region)
+  #scale_fill_manual(name = "Region", values = c("darkblue", "orange", "darkblue")) +
+  # Use new_scale_fill() to allow a second independent fill scale
+  #ggnewscale::new_scale_fill() +
+  
+  ##genotypes
+  geom_rect(aes(xmin = SNP_A_numeric-1, xmax = SNP_A_numeric + 1, ymin = .46, ymax = .48), fill = "grey2",na.rm = TRUE) +
+  geom_text(x = -1.5, y = 0.47, label = "Haplotype 1", inherit.aes = FALSE, na.rm = TRUE, fontface = "plain") +
+  geom_rect(aes(xmin = SNP_A_numeric-1, xmax = SNP_A_numeric + 1, ymin = .36, ymax = .38), fill = "grey55",na.rm = TRUE) +
+   geom_text(x = -1.5, y = 0.37, label = "Haplotype 2", inherit.aes = FALSE, na.rm = TRUE, fontface = "plain") +
+  geom_rect(aes(xmin = SNP_A_numeric-1, xmax = SNP_A_numeric + 1, ymin = .26, ymax = .28), fill = "grey88",na.rm = TRUE) +
+   geom_text(x = -1.5, y = 0.27, label = "Haplotype 3", inherit.aes = FALSE, na.rm = TRUE, fontface = "plain") +
+  
+  ylim(0.25, 0.6) +
+  xlim(-2, 22) +
+  # geom_point for avg_methylation_lowfreq, filled by 'avg_methylation_lowfreq'
+  geom_point(aes(x = SNP_A_numeric, y = 0.5, size = 5, fill = avg_methylation_lowfreq),
+             shape = 21, color = "black", na.rm = TRUE) +
+  # geom_point for avg_methylation_mid, filled by 'avg_methylation_mid'
+  geom_point(aes(x = SNP_A_numeric, y = 0.4, size = 5, fill = avg_methylation_mid),
+             shape = 21, color = "black", na.rm = TRUE) +
+  # geom_point for avg_methylation_highfreq, filled by 'avg_methylation_highfreq'
+  geom_point(aes(x = SNP_A_numeric, y = 0.3, size = 5, fill = avg_methylation_highfreq),
+             shape = 21, color = "black", na.rm = TRUE) +
+  # Define the scale for the second fill aesthetic (methylation)
+  scale_fill_gradient(low = "white", high = "navyblue", name = "Avg Methylation") +
+  labs(
+    title = "Linkage by chromosome with SNP and Methylation Sites",
+    x = "Position (BP)",
+    y = "PST (blue line)",
+    size = "Avg Methylation"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.key.size = unit(0.75, "cm"),
+    legend.text = element_text(size = 14),
+    legend.justification = c("right", "top"),
+    #legend.position = "none", # Set legend position to "none"
+    legend.box.just = "right",
+    legend.box.background = element_rect(fill = "white", color = "black"),
+    legend.margin = margin(6, 6, 6, 6),
+    legend.title = element_text(size = 10),
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    plot.title = element_blank(),
+    # New lines to remove background grid lines
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  ) +
+  scale_size_continuous(range = c(2, 8))
+
+# Print the plot
+print(chr11_plot)
+
+ggsave("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/3_Linkage/1_Rall/3_high_LD_haplotypes_label.png", plot = chr11_plot, width = 8, height = 3, units = "in", dpi = 500)
+
+```
+
+Create Plot data
+```{r}
+# Get unique snp.sites with vertical positions
+snp_sites <- distinct(chr11_inv_hld, snp.site, bp_snp) 
+snp_sites <- snp_sites %>%
+  arrange(bp_snp)
+snp_sites$y_pos <- row.names(snp_sites) 
+snp_sites$x_pos <- 1 
+#snp_sites <- snp_sites[,-2]
+
+# Get unique meth.sites with vertical positions
+meth_sites <- distinct(chr11_inv_hld, meth.site, bp_meth)
+meth_sites <- meth_sites %>%
+  arrange(bp_meth)
+meth_sites$y_pos <- row.names(meth_sites) 
+meth_sites$x_pos <- 3 
+#meth_sites <- meth_sites[,-2]
+
+# Merge the dataframes to get the positions for the lines
+plot_data <- chr11_inv_hld %>%
+  left_join(snp_sites, by = "snp.site") %>%
+  rename(x_start = x_pos, y_start = y_pos) %>%
+  left_join(meth_sites, by = "meth.site") %>%
+  rename(x_end = x_pos, y_end = y_pos) %>%
+  left_join(vcf, by= c("CHR_B" = "CHROM", "bp_snp.x" = "POS"))
+
+```
+
+
+```{r}
+
+p <- ggplot() +
+  geom_hline(yintercept = 0.825, color = "black", linetype = "dashed", linewidth = 0.2) + # Middle of first rect
+  geom_hline(yintercept = 0.725, color = "black", linetype = "dashed", linewidth = 0.2) + # Middle of second rect
+  geom_hline(yintercept = 0.625, color = "black", linetype = "dashed", linewidth = 0.2) + # Middle of third rect
+  # plot low freq genotype - matches always to reference (0)
+  geom_rect(data = plot_data,
+            aes(xmin = BP_A + 200000, xmax = BP_A, ymin = 0.80, ymax = 0.85,
+                fill = case_when(
+                  avg_snp_lowfreq < 0.5 ~ "0",
+                  avg_snp_lowfreq >= 0.6 & avg_snp_lowfreq <= 1.5 ~ "1",
+                  avg_snp_lowfreq > 1.7 ~ "2",
+                  TRUE ~ NA_character_ # Handle NA or other cases
+                )),
+            alpha = 0.8, color = NA) +
+  # plot medium freq genotype(heterozygous)
+  geom_rect(data = plot_data,
+            aes(xmin = BP_A + 200000, xmax = BP_A, ymin = 0.70, ymax = 0.75,
+                fill = case_when(
+                  avg_snp_mid < .5 ~ "0",
+                  avg_snp_mid >= .6 & avg_snp_mid <= 1.5 ~ "1",
+                  avg_snp_mid > 1.7 ~ "2",
+                  TRUE ~ NA_character_ # Handle NA or other cases
+                )),
+            alpha = 0.8, color = NA) +
+  # plot high freq genotype(heterozygous)
+  geom_rect(data = plot_data,
+            aes(xmin = BP_A + 200000, xmax = BP_A, ymin = 0.60, ymax = 0.65,
+                fill = case_when(
+                  avg_snp_highfreq < .5 ~ "0",
+                  avg_snp_highfreq >= .6 & avg_snp_highfreq <= 1.5 ~ "1",
+                  avg_snp_highfreq > 1.7 ~ "2",
+                  TRUE ~ NA_character_ # Handle NA or other cases
+                )),
+            alpha = 0.8, color = NA) +
+  theme_minimal() + # Start with minimal theme
+  scale_fill_manual(
+    values = c("0" = "#cefad0", "1" = "#3CB371", "2" = "#006400"),
+    name = "SNP Category",
+    na.translate = FALSE # This removes NA from the legend
+  ) +
+  # Set appropriate y-axis limits to clearly show the rects
+  # Based on ymin/ymax values (0.60 to 0.85)
+  scale_y_continuous(limits = c(0.55, 0.90)) + # Adjust limits slightly for padding
+  # Remove all background lines, tick marks, and axis labels
+  theme(
+    legend.position = "bottom", # Keep legend position
+    legend.direction = "horizontal", # Keep legend direction
+    axis.line = element_blank(), # Remove axis lines
+    axis.text.x = element_blank(), # Remove x-axis text (tick labels)
+    axis.text.y = element_blank(), # Remove y-axis text (tick labels)
+    axis.ticks = element_blank(), # Remove tick marks
+    axis.title = element_blank(), # Remove axis titles
+    panel.grid.major = element_blank(), # Remove major grid lines
+    panel.grid.minor = element_blank(), # Remove minor grid lines
+    panel.background = element_blank(), # Remove panel background
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 14) # Keep plot title style
+  ) +
+  labs(title = "Genotype Frequency Categories") # Custom title for this plot
+
+# Print the plot to display it
+print(p)
+
+```
+
+```{r}
+
+p1 <- ggplot() +
+  #horizontal lines
+  geom_hline(yintercept = 0.825, color = "black", linetype = "dashed", linewidth = 0.2) + # Middle of first rect
+  geom_hline(yintercept = 0.725, color = "black", linetype = "dashed", linewidth = 0.2) + # Middle of second rect
+  geom_hline(yintercept = 0.625, color = "black", linetype = "dashed", linewidth = 0.2) + # Middle of third rect
+  # plot low freq genotype - matches always to reference (0)
+  geom_rect(data = plot_data,
+            aes(xmin = BP_A + 200000, xmax = BP_A, ymin = 0.80, ymax = 0.85,
+                fill = case_when(
+                  avg_methylation_lowfreq < 0.3 ~ "<30%",
+                  avg_methylation_lowfreq >= 0.3 & avg_methylation_lowfreq <= 0.7 ~ "30-70%",
+                  avg_methylation_lowfreq > 0.7 ~ ">70%",
+                  TRUE ~ NA_character_ # Handle NA or other cases
+                )),
+            alpha = 0.8, color = NA) +
+  # plot medium freq genotype(heterozygous)
+  geom_rect(data = plot_data,
+            aes(xmin = BP_A + 200000, xmax = BP_A, ymin = 0.70, ymax = 0.75,
+                fill = case_when(
+                  avg_methylation_mid < 0.3 ~ "<30%",
+                  avg_methylation_mid >= 0.3 & avg_methylation_mid <= 0.7 ~ "30-70%",
+                  avg_methylation_mid > 0.7 ~ ">70%",
+                  TRUE ~ NA_character_ # Handle NA or other cases
+                )),
+            alpha = 0.8, color = NA) +
+  # plot high freq genotype(heterozygous)
+  geom_rect(data = plot_data,
+            aes(xmin = BP_A + 200000, xmax = BP_A, ymin = 0.60, ymax = 0.65,
+                fill = case_when(
+                  avg_methylation_highfreq < 0.3 ~ "<30%",
+                  avg_methylation_highfreq >= 0.3 & avg_methylation_highfreq <= 0.7 ~ "30-70%",
+                  avg_methylation_highfreq > 0.7 ~ ">70%",
+                  TRUE ~ NA_character_ # Handle NA or other cases
+                )),
+            alpha = 0.8, color = NA) +
+  theme_minimal() + # Start with minimal theme
+  scale_fill_manual(
+    values = c("<30%" = "grey77", "30-70%" = "grey55", ">70%" = "grey11"),
+    name = "SNP Category",
+    na.translate = FALSE # This removes NA from the legend
+  ) +
+  # Set appropriate y-axis limits to clearly show the rects
+  # Based on ymin/ymax values (0.60 to 0.85)
+  scale_y_continuous(limits = c(0.55, 0.90)) + # Adjust limits slightly for padding
+  # Remove all background lines, tick marks, and axis labels
+  theme(
+    legend.position = "bottom", # Keep legend position
+    legend.direction = "horizontal", # Keep legend direction
+    axis.line = element_blank(), # Remove axis lines
+    axis.text.x = element_blank(), # Remove x-axis text (tick labels)
+    axis.text.y = element_blank(), # Remove y-axis text (tick labels)
+    axis.ticks = element_blank(), # Remove tick marks
+    axis.title = element_blank(), # Remove axis titles
+    panel.grid.major = element_blank(), # Remove major grid lines
+    panel.grid.minor = element_blank(), # Remove minor grid lines
+    panel.background = element_blank(), # Remove panel background
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 14) # Keep plot title style
+  ) +
+  labs(title = "DNAm Categories") # Custom title for this plot
+
+# Print the plot to display it
+print(p1)
+
+```
+
+Plot but better scaled
+
+```{r}
+plot_data <- plot_data %>%
+  arrange(bp_snp.x) %>% # Order by one of the coordinate columns
+  mutate(
+    block_id_snp = cumsum(c(TRUE, diff(bp_snp.x) > 1e6)), # Example: New block if gap > 1e6
+    block_id_meth = cumsum(c(TRUE, diff(bp_meth.x) > 1e6)) # Adjust threshold as needed
+  )
+
+# For simplicity, let's combine block IDs if they don't align perfectly
+plot_data <- plot_data %>%
+  mutate(combined_block_id = paste0(block_id_snp, "-", block_id_meth)) %>%
+  mutate(block_numeric_id = as.numeric(factor(combined_block_id)))
+
+
+# 2. Scale Coordinates Within Each Block
+plot_data_scaled <- plot_data %>%
+  group_by(block_numeric_id) %>%
+  mutate(
+    scaled_bp_snp = scales::rescale(bp_snp.x, to = c(min(cur_group_id()) * 10, min(cur_group_id()) * 10 + n())),
+    scaled_bp_meth = scales::rescale(bp_meth.x, to = c(min(cur_group_id()) * 10, min(cur_group_id()) * 10 + n()))
+  ) %>%
+  ungroup()
+
+# 3. Create the Plot with Scaled Coordinates
+ggplot(plot_data_scaled) +
+  geom_segment(aes(x = scaled_bp_meth, y = as.numeric(x_start), xend = scaled_bp_snp, yend = as.numeric(x_end), linetype = line_type, color = line_color, size = as.factor(line_size))) +
+  scale_color_manual(values = c("grey", "black", "red")) +
+  new_scale_color() +
+  geom_point(data = snp_sites %>% inner_join(select(plot_data_scaled, snp.site, snp_freq_class, scaled_bp_snp), by = "snp.site"),
+             aes(x = scaled_bp_snp, y = x_pos, color = snp_freq_class), shape = 15, size = 5) +
+  scale_color_manual(values = c("lightgreen","#74c476", "darkgreen")) +
+  geom_point(data = meth_sites %>% inner_join(select(plot_data_scaled, meth.site, meth_freq_class, scaled_bp_meth), by = "meth.site"),
+             aes(x = scaled_bp_meth, y = x_pos, fill = meth_freq_class), shape = 21, size = 5) +
+  scale_fill_manual(values = c( "white", "grey", "black")) +
+  geom_text(data = meth_sites %>% inner_join(select(plot_data_scaled, meth.site, scaled_bp_meth, y_pos = y), by = "meth.site"),
+            aes(x = scaled_bp_meth + 1, y = x_pos + 0.3, label = meth.site), # Adjust label position
+            hjust = 0, size = 3, angle = 45) +
+  scale_linetype_manual(values = c("dotted", "dotted", "solid")) +
+  scale_size_manual(values = c(0.2, .5)) +
+  scale_x_continuous(breaks = NULL, labels = NULL) + # Remove x-axis ticks and labels
+  scale_y_continuous(limits = c(0.5, 5.5), breaks = c(1, 2), labels = c("SNP Site", "Methylation Site")) +
+  theme_void() +
+  theme(legend.position = "bottom") +
+  labs(linetype = "R2", color = "R2", size = "R2")
+
+```
+
+
+```{r}
+################USE RGT_PST_FST_focal_regions to load in fst on chr 11
+
+fst.chr11.rr.reu <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowWGS_168/1_Population_Structure/4_pixy/HR.168.invariant/HR.168.invariant.eu_chr11_fst.txt", header=F)
+colnames(fst.chr11.rr.reu) <- c("pop1", "pop2", "chromosome", "window_pos_1", "window_pos_2", "avg_wc_fst", "no_snps")
+fst.chr11.rr.reu <- fst.chr11.rr.reu %>%
+  filter(pop1 == "rustica.eu" & pop2 == "rustica.r")
+fst.chr11.rch.rfi <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowWGS_168/1_Population_Structure/4_pixy/HR.168.invariant.ch.fi.5kb/HR.chr11.ch.fi.fst.txt", header=F)
+colnames(fst.chr11.rch.rfi) <- c("pop1", "pop2", "chromosome", "window_pos_1", "window_pos_2", "avg_wc_fst", "no_snps")
+
+fst.chr11.rde.rfi <- read.table("/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowWGS_168/1_Population_Structure/4_pixy/HR.168.invariant.ch.fi.5kb/HR.chr11.de.fi.fst.txt", header=F)
+colnames(fst.chr11.rde.rfi) <- c("pop1", "pop2", "chromosome", "window_pos_1", "window_pos_2", "avg_wc_fst", "no_snps")
+
+ggplot(fst.chr11.rr.reu, aes(x = window_pos_1, y = avg_wc_fst)) +
+  geom_point(color= "grey22", alpha=0.4, size=0.5) +
+  #scale_fill_gradient(low = "red", high = "blue") +
+  labs(title = "FST (Europe vs. Russia) on Chromosome 11",
+       x = "Base Position A",
+       y = "Average FST",
+       fill = "Average FST") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggplot(fst.chr11.rch.rfi, aes(x = window_pos_1, y = avg_wc_fst)) +
+  geom_point(color= "grey22", alpha=0.4, size=0.5) +
+  #scale_fill_gradient(low = "red", high = "blue") +
+  labs(title = "FST (Swiss vs. Finnish) on Chromosome 11",
+       x = "Base Position A",
+       y = "Average FST",
+       fill = "Average FST") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggplot(fst.chr11.rde.rfi, aes(x = window_pos_1, y = avg_wc_fst)) +
+  geom_point(color= "grey22", alpha=0.4, size=0.5) +
+  #scale_fill_gradient(low = "red", high = "blue") +
+  labs(title = "FST (Swiss vs. Finnish) on Chromosome 11",
+       x = "Base Position A",
+       y = "Average FST",
+       fill = "Average FST") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+```
+## Run local PCA in this region
+
+We can set up a function that uses ggplot in order to plot the PCA from the eigenvalues and eigenvector files, while also pulling information from the metadata, which gives us information on the subspecies/population information. This can be altered to use shape as well to look at two different metadata columns at once (at the moment I only use color).
+
+In this section, where the tag'sub' is refers to subspecies,so if you would like to plot rather by population, the colour= needs to be set to 'pop' and the color_sub needs to be set to color_pop and needs to reflect the number of populations present.
+
+The pop.map file is a text file which has three columns ind (individual name matching the vcf file), pop (corresponding pop of that individual), sub(corresponding subspecies of that individual). This is a tab separated file.
+
+First, run PCA in plink to form the input files (this was run on chr11...could also narrow to specific BP region):
+
+```{r, message=FALSE, warning=FALSE}
+# def functions --------
+plot.pca <- function(data,X,Y, colors){
+    p <- ggplot(data = data, aes_string(x=X, y=Y, colour ="pop",label="ind")) + 
+      geom_point(size=4) +
+      theme_bw() +
+      scale_colour_manual(values=colors) +
+      ylab(paste0(Y ,"(", signif(pve$pve[pve$PC==Y], 3), "%)")) +
+      xlab(paste0(X ,"(", signif(pve$pve[pve$PC==X], 3), "%)")) +
+      labs(colour="",shape="")  +
+      theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+    return(p)
+}
+
+##this looks at the eigenvalues and the percent of variance explained by each PC axis
+plot.pve <- function(pve){
+   pve.p <- ggplot(data=pve, aes(x=PC, y=pve)) +
+    geom_bar(stat="identity", fill="#418979") + 
+    theme_bw()  +
+    ylab("Explained variation (%)") +
+    xlab("Principal Component") +
+    ggtitle("Scree plot - PCA ")+
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+  
+  return(pve.p)
+}
+
+# def variables --------
+eigenval <- "/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2022_SwallowWGS/Results/4_Genome_scans/4_local_pca/plink/rustica.onlySNPs.qual20.miss005.maf05.depth5_35.BiallelicOnly.PASS.removeoutliers.LDprunned.chr11.eigenval"
+eigenvec <- "/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2022_SwallowWGS/Results/4_Genome_scans/4_local_pca/plink/rustica.onlySNPs.qual20.miss005.maf05.depth5_35.BiallelicOnly.PASS.removeoutliers.LDprunned.chr11.eigenvec"
+pop <- "/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2022_SwallowWGS/Results/4_Genome_scans/4_local_pca/plink/popmap.txt"
+color_sub <- c("#213B82","#E6C99E","#DA4E2F")
+
+#Geting pop and groups code -------
+pop.map <- read.table(pop, header = F, sep = " ")
+colnames(pop.map) <- c("ind","pop")
+
+#Get eigen values and vectors -----
+pca <- read.table(eigenvec)
+eigenval <- scan(eigenval)
+
+# Clean-up data -------
+# remove nuisance column
+pca <- pca[,-1]
+# set names
+names(pca)[1] <- "ind"
+names(pca)[2:ncol(pca)] <- paste0("PC", 1:(ncol(pca)-1))
+# join pop data to pca results
+pca <- dplyr::left_join(pca, pop.map,by = c('ind' = 'ind'))
+```
+
+### Cumulative variance of components
+
+Here we want to plot the amount of variance described by each PC axis. We do this by using the eigenvalues and converting this to a percentage of variance.
+
+```{r}
+#Plot cumulative variance of components
+pve <- data.frame(PC = paste0("PC", 1:(ncol(pca)-2)), pve = eigenval/sum(eigenval)*100)
+pve$PC <- factor(pve$PC, levels=unique(pve$PC))
+ggplotly(plot.pve(pve))
+```
+
+###Plot PCA axes 
+
+```{r, message=FALSE, warning=FALSE}
+#Plot first 3 PCA combos 
+p1 <- plot.pca(pca, "PC1","PC2", color_sub)
+p2 <- plot.pca(pca, "PC1","PC3", color_sub)
+p3 <- plot.pca(pca, "PC2","PC3", color_sub)
+
+p1
+p2
+p3
+```
+
+##Chromosome 34
+Look at the region in chromosome 34.
+
+```{r}
+# Filter for chromosome 11
+chr34_data <- meth.high.ld %>%
+  filter(CHR_A == "chr34" & CHR_B == "chr34") 
+chr34_data$BP_A <- as.numeric(chr34_data$BP_A)
+chr34_data$BP_B <- as.numeric(chr34_data$BP_B)
+
+chr34 <- ggplot(chr34_data, aes(x = BP_A, y = R2), na.rm=T) +
+  geom_point()+
+  labs(title = "Linkage by chromsome",
+       x = "Position",
+       y = "Average R²") +
+  theme_minimal() +
+  theme(legend.key.size = unit(0.75, "cm"), # Adjust size as needed
+        legend.text = element_text(size = 14),
+        legend.position = c(.95, .95),
+        legend.justification = c("right", "top"),
+        legend.box.just = "right",
+        legend.box.background = element_rect(fill = "white", color = "black"), 
+        legend.margin = margin(6, 6, 6, 6),
+        legend.title = element_blank(),
+        axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold"),
+        plot.title = element_blank())
+
+chr34
+
+chr34.dist <- ggplot(chr34_data, aes(x = distance, y = R2), na.rm=T) +
+  geom_point()+
+  labs(title = "Linkage by chromsome",
+       x = "Distance",
+       y = "Average R²") +
+  theme_minimal() +
+  theme(legend.key.size = unit(0.75, "cm"), # Adjust size as needed
+        legend.text = element_text(size = 14),
+        legend.position = c(.95, .95),
+        legend.justification = c("right", "top"),
+        legend.box.just = "right",
+        legend.box.background = element_rect(fill = "white", color = "black"), 
+        legend.margin = margin(6, 6, 6, 6),
+        legend.title = element_blank(),
+        axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold"),
+        plot.title = element_blank())
+
+chr34.dist
+```
+
+This is rather due to a lack of data points and not an overall increase in R2 values.
+
+#Meth-Meth comparisons
+The highest Meth-Meth linkage is occurring in chromosome 20 and chromosome 31. Let's examine these:
+
+##Chromosome 20
+Look at the region in chromosome 20. This is also where we see high PST values between gutturalis and rustica
+
+```{r}
+# Filter for chromosome 11
+chr20_data <- meth.high.ld %>%
+  filter(CHR_A == "chr20" & CHR_B == "chr20") 
+chr20_data$BP_A <- as.numeric(chr20_data$BP_A)
+chr20_data$BP_B <- as.numeric(chr20_data$BP_B)
+
+chr20 <- ggplot(chr20_data, aes(x = BP_A, y = R2), na.rm=T) +
+  geom_point()+
+  labs(title = "Linkage by chromsome",
+       x = "Position",
+       y = "Average R²") +
+  theme_minimal() +
+  theme(legend.key.size = unit(0.75, "cm"), # Adjust size as needed
+        legend.text = element_text(size = 14),
+        legend.position = c(.95, .95),
+        legend.justification = c("right", "top"),
+        legend.box.just = "right",
+        legend.box.background = element_rect(fill = "white", color = "black"), 
+        legend.margin = margin(6, 6, 6, 6),
+        legend.title = element_blank(),
+        axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold"),
+        plot.title = element_blank())
+
+chr20
+
+chr20.dist <- ggplot(chr20_data, aes(x = distance, y = R2), na.rm=T) +
+  geom_point()+
+  labs(title = "Linkage by chromsome",
+       x = "Distance",
+       y = "Average R²") +
+  theme_minimal() +
+  theme(legend.key.size = unit(0.75, "cm"), # Adjust size as needed
+        legend.text = element_text(size = 14),
+        legend.position = c(.95, .95),
+        legend.justification = c("right", "top"),
+        legend.box.just = "right",
+        legend.box.background = element_rect(fill = "white", color = "black"), 
+        legend.margin = margin(6, 6, 6, 6),
+        legend.title = element_blank(),
+        axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold"),
+        plot.title = element_blank())
+
+chr20.dist
+```
+
+And in chromosome 31
+
+```{r}
+# Filter for chromosome 11
+chr31_data <- meth.high.ld %>%
+  filter(CHR_A == "chr31" & CHR_B == "chr31") 
+chr31_data$BP_A <- as.numeric(chr31_data$BP_A)
+chr31_data$BP_B <- as.numeric(chr31_data$BP_B)
+
+chr31 <- ggplot(chr31_data, aes(x = BP_A, y = R2), na.rm=T) +
+  geom_point()+
+  labs(title = "Linkage by chromsome",
+       x = "Position",
+       y = "Average R²") +
+  theme_minimal() +
+  theme(legend.key.size = unit(0.75, "cm"), # Adjust size as needed
+        legend.text = element_text(size = 14),
+        legend.position = c(.95, .95),
+        legend.justification = c("right", "top"),
+        legend.box.just = "right",
+        legend.box.background = element_rect(fill = "white", color = "black"), 
+        legend.margin = margin(6, 6, 6, 6),
+        legend.title = element_blank(),
+        axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold"),
+        plot.title = element_blank())
+
+chr31
+
+chr31.dist <- ggplot(chr31_data, aes(x = distance, y = R2), na.rm=T) +
+  geom_point()+
+  labs(title = "Linkage by chromsome",
+       x = "Distance",
+       y = "Average R²") +
+  theme_minimal() +
+  theme(legend.key.size = unit(0.75, "cm"), # Adjust size as needed
+        legend.text = element_text(size = 14),
+        legend.position = c(.95, .95),
+        legend.justification = c("right", "top"),
+        legend.box.just = "right",
+        legend.box.background = element_rect(fill = "white", color = "black"), 
+        legend.margin = margin(6, 6, 6, 6),
+        legend.title = element_blank(),
+        axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold"),
+        plot.title = element_blank())
+
+chr31.dist
+```

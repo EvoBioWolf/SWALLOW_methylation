@@ -1,0 +1,57 @@
+PLINK v1.90b6.21 64-bit (19 Oct 2020)
+Options in effect:
+  --allow-extra-chr
+  --allow-no-sex
+  --chr 11
+  --chr-set 37 no-xy
+  --keep-allele-order
+  --ld-window 100
+  --ld-window-kb 70
+  --ld-window-r2 0
+  --maf 0.2
+  --make-bed
+  --map 0_HR.85.20miss.rmlowv.rmout.snp.meth.map
+  --out /dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/3_Linkage/1_chr11/HR.85.maf2.ldwin100.70kb
+  --ped 0_HR.85.20miss.rmlowv.rmout.snp.meth.ped
+  --r2 gz
+
+Hostname: hlegr1409n02
+Working directory: /dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/3_Linkage
+Start time: Fri May 23 13:47:08 2025
+
+Random number seed: 1748000828
+386469 MB RAM detected; reserving 193234 MB for main workspace.
+Scanning .ped file... done.
+Performing single-pass .bed write (135977 variants, 85 samples).
+--file:
+/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/3_Linkage/1_chr11/HR.85.maf2.ldwin100.70kb-temporary.bed
++
+/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/3_Linkage/1_chr11/HR.85.maf2.ldwin100.70kb-temporary.bim
++
+/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/3_Linkage/1_chr11/HR.85.maf2.ldwin100.70kb-temporary.fam
+written.
+135977 variants loaded from .bim file.
+85 samples (0 males, 0 females, 85 ambiguous) loaded from .fam.
+Ambiguous sex IDs written to
+/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/3_Linkage/1_chr11/HR.85.maf2.ldwin100.70kb.nosex
+.
+Using up to 79 threads (change this with --threads).
+Before main variant filters, 85 founders and 0 nonfounders present.
+Calculating allele frequencies... done.
+Total genotyping rate is 0.92734.
+94103 variants removed due to minor allele threshold(s)
+(--maf/--max-maf/--mac/--max-mac).
+41874 variants and 85 samples pass filters and QC.
+Note: No phenotypes present.
+--make-bed to
+/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/3_Linkage/1_chr11/HR.85.maf2.ldwin100.70kb.bed
++
+/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/3_Linkage/1_chr11/HR.85.maf2.ldwin100.70kb.bim
++
+/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/3_Linkage/1_chr11/HR.85.maf2.ldwin100.70kb.fam
+... done.
+--r2 to
+/dss/dsslegfs01/pr53da/pr53da-dss-0034/projects/2021_SwallowRRBS/3_Linkage/1_chr11/HR.85.maf2.ldwin100.70kb.ld.gz
+... done.
+
+End time: Fri May 23 13:47:31 2025
