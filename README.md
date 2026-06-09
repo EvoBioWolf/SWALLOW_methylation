@@ -24,7 +24,7 @@ The repository is organized following the sequential steps of the analysis:
   
 - **`1_Population_Structure/`**: Analysis of genetic and epigenetic clustering (PCA, Admixture).
   
-- **`2_Divergence/`**: Calculations of $F_{ST}$ and $P_{ST}$ to identify genomic regions under selection.
+- **`2_Divergence/`**: Calculations of $F_{ST}$ and $P_{ST}$ to identify epigenetic and genetic covariation.
   
 - **`3_Linkage/`**: Linkage Disequilibrium (LD) decay and haplotype analysis.
   
